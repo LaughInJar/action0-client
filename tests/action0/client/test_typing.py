@@ -17,6 +17,7 @@ from typing import Awaitable
 from typing import Callable
 from typing import TypeVar
 from typing import assert_type
+from typing import cast
 
 from twisted.internet.defer import Deferred
 
@@ -24,6 +25,7 @@ from action0.client import APIClient
 from action0.client import Backend
 from action0.client import Client
 from action0.client import JsonOperation
+from action0.client import Operation
 from action0.client import path_param
 from action0.client.backends.httpx import AsyncHttpxBackend
 from action0.client.backends.httpx import HttpxBackend
@@ -37,6 +39,7 @@ from action0.req import Response
 
 T = TypeVar("T")
 S = TypeVar("S")
+R = TypeVar("R")
 
 
 @dataclass
@@ -154,6 +157,37 @@ def check_api_client_custom_wrapper() -> None:
     """
     client = APIClient(FutureBackend(), "https://api.example.com")
     assert_type(client.send(GetItem(item_id=1)), Any)
+
+
+FutureBackendT_co = TypeVar("FutureBackendT_co", bound="Backend[Future[Response]]", covariant=True)
+
+
+class FutureAPIClient(APIClient[FutureBackendT_co]):
+    """
+    The documented escape hatch for custom execution models: subclass
+    APIClient and re-declare send() with the wrapper spelled out — the one
+    cast is the price of the missing higher-kinded types.
+    """
+
+    # pyright ignore: its override check compares against every parent
+    # overload without filtering by this subclass's self type (none of the
+    # shipped-wrapper overloads can ever apply to a Future backend)
+    def send(  # pyright: ignore[reportIncompatibleMethodOverride]
+        self, operation: "Operation[R]"
+    ) -> "Future[R]":
+        """
+        :param operation: the operation to execute
+        :return: a Future of the parsed result
+        """
+        return cast("Future[R]", super().send(operation))
+
+
+def check_api_client_subclass_escape_hatch() -> None:
+    """A re-typed subclass makes a custom wrapper precise on ring 1 too."""
+    client = FutureAPIClient(FutureBackend(), "https://api.example.com")
+    assert_type(client.send(GetItem(item_id=1)), Future[Item])
+    # the concrete backend type survives the subclass
+    assert_type(client.backend, FutureBackend)
 
 
 def check_only_backends_accepted() -> None:

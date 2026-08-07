@@ -184,7 +184,10 @@ class APIClient(Generic[BackendT_co]):
                  execution model: plain for a sync backend, awaitable for
                  an async backend, a Deferred for a Twisted backend —
                  those three are typed precisely; any other execution
-                 model works the same way but is typed ``Any``
+                 model works the same way but is typed ``Any`` (for
+                 precise typing of a custom wrapper, subclass and
+                 re-declare ``send`` — see the *Other execution models*
+                 section of the guide)
         :raises action0.client.errors.ClientError: transport failures and
                 response parsing failures (for async and Twisted backends
                 they arrive at ``await`` time / in the errback instead of

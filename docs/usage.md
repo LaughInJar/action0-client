@@ -535,3 +535,36 @@ the operation's result type" for an *arbitrary* wrapper would need
 higher-kinded types, which Python doesn't have — only the three shipped
 wrappers are spelled out as overloads); everything works normally at
 runtime.
+
+If you want that precision for your wrapper too, the escape hatch is to
+subclass {py:class}`~action0.client.api.APIClient` and re-declare `send()`
+with the wrapper spelled out — one `cast` is the price of the missing
+higher-kinded types:
+
+```python
+from typing import TypeVar, cast
+from action0.client import APIClient, Backend, Operation
+from action0.req import Response
+
+R = TypeVar("R")
+FutureBackendT_co = TypeVar("FutureBackendT_co", bound=Backend[Future[Response]], covariant=True)
+
+
+class FutureAPIClient(APIClient[FutureBackendT_co]):
+    """An APIClient whose send() results are precisely typed Futures."""
+
+    # pyright ignore: its override check compares against every parent
+    # overload without filtering by this subclass's self type (none of
+    # the shipped-wrapper overloads can ever apply to a Future backend)
+    def send(  # pyright: ignore[reportIncompatibleMethodOverride]
+        self, operation: Operation[R]
+    ) -> Future[R]:
+        return cast(Future[R], super().send(operation))
+```
+
+Now `FutureAPIClient(FutureBackend(...), "https://api.example.com")` sends
+an `Operation[Item]` as a `Future[Item]` — for every operation, without
+per-call casts, and the concrete backend type stays visible on
+`client.backend`. mypy and ty accept the override as-is; pyright wants the
+one suppression shown above. The pattern is pinned in the typing test
+suite (`tests/action0/client/test_typing.py`), so it keeps working.
