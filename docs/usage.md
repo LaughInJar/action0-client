@@ -321,6 +321,41 @@ by default — under trio pass `sleep=trio.sleep`; the Twisted wrapper
 takes a `reactor=` for its backoff timer (the global reactor by
 default).
 
+## Caching
+
+For read-mostly APIs there is an explicit, TTL-based response cache —
+again one wrapper per execution model
+({py:class}`~action0.client.caching.CachingSyncBackend` /
+{py:class}`~action0.client.caching.CachingAsyncBackend` /
+{py:class}`~action0.client.caching.CachingDeferredBackend`):
+
+```python
+from action0.client import APIClient, CachePolicy, CachingSyncBackend
+from action0.client.backends.requests import RequestsBackend
+
+with RequestsBackend() as inner:
+    backend = CachingSyncBackend(inner, CachePolicy(ttl=60))
+    client = APIClient(backend, "https://api.example.com/v1")
+    first = client.send(GetRates(currency="eur"))  # network
+    second = client.send(GetRates(currency="eur"))  # cache, network untouched
+```
+
+The {py:class}`~action0.client.caching.CachePolicy` decides what is
+cached: GET/HEAD only, status 200 only, for `ttl` seconds, keyed by
+method + URL + the `vary_headers` request headers (`Accept`,
+`Accept-Language` by default). Hits are independent copies, so mutating
+a served response cannot corrupt the cache; responses with streaming
+bodies are never stored. Entries live in a
+{py:class}`~action0.client.caching.CacheStore` — the bundled
+{py:class}`~action0.client.caching.MemoryCache` is a thread-safe
+in-process LRU; implement the two-method protocol to plug in memcached,
+redis and friends.
+
+This is deliberately **not** an RFC 9111 HTTP cache — no `Cache-Control`
+parsing, no revalidation. It is the "a result up to a minute old is
+fine" cache that read-heavy API clients end up hand-rolling, made
+explicit.
+
 ## Typed API clients: operations
 
 An {py:class}`~action0.client.operation.Operation` describes one endpoint.

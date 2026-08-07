@@ -29,6 +29,12 @@ from .backend import DeferredBackend
 from .backend import FuturesBackend
 from .backend import SendResultT_co
 from .backend import SyncBackend
+from .caching import CachePolicy
+from .caching import CacheStore
+from .caching import CachingAsyncBackend
+from .caching import CachingDeferredBackend
+from .caching import CachingSyncBackend
+from .caching import MemoryCache
 from .client import Client
 from .errors import APIError
 from .errors import ClientError
@@ -62,6 +68,11 @@ __all__ = [
     "BaseAsyncBackend",
     "BaseDeferredBackend",
     "BaseSyncBackend",
+    "CachePolicy",
+    "CacheStore",
+    "CachingAsyncBackend",
+    "CachingDeferredBackend",
+    "CachingSyncBackend",
     "Client",
     "ClientError",
     "DeferredBackend",
@@ -71,6 +82,7 @@ __all__ = [
     "JsonOperation",
     "Location",
     "LoggingHook",
+    "MemoryCache",
     "Operation",
     "RetryPolicy",
     "RetryingAsyncBackend",

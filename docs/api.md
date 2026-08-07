@@ -86,6 +86,13 @@ from action0.client.testing import StubBackend, AsyncStubBackend, DeferredStubBa
    :members:
 ```
 
+## Caching
+
+```{eval-rst}
+.. automodule:: action0.client.caching
+   :members:
+```
+
 ## Errors
 
 ```{eval-rst}
