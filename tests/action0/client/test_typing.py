@@ -36,6 +36,9 @@ from action0.client.backends.requests import RequestsBackend
 from action0.client.backends.twisted import TwistedBackend
 from action0.client.backends.urllib import UrllibBackend
 from action0.client.backends.urllib3 import Urllib3Backend
+from action0.client.caching import CachingAsyncBackend
+from action0.client.caching import CachingDeferredBackend
+from action0.client.caching import CachingSyncBackend
 from action0.client.retry import RetryingAsyncBackend
 from action0.client.retry import RetryingDeferredBackend
 from action0.client.retry import RetryingSyncBackend
@@ -152,6 +155,19 @@ def check_retrying_wrappers_preserve_types(request: Request) -> None:
     assert_type(async_client.send(GetItem(item_id=1)), Awaitable[Item])
     deferred_client = APIClient(
         RetryingDeferredBackend(DeferredStubBackend()), "https://api.example.com"
+    )
+    assert_type(deferred_client.send(GetItem(item_id=1)), Deferred[Item])
+
+
+def check_caching_wrappers_preserve_types(request: Request) -> None:
+    """The caching wrappers keep their inner backend's execution model."""
+    assert_type(Client(CachingSyncBackend(StubBackend())).send(request), Response)
+    sync_client = APIClient(CachingSyncBackend(RequestsBackend()), "https://api.example.com")
+    assert_type(sync_client.send(GetItem(item_id=1)), Item)
+    async_client = APIClient(CachingAsyncBackend(AsyncStubBackend()), "https://api.example.com")
+    assert_type(async_client.send(GetItem(item_id=1)), Awaitable[Item])
+    deferred_client = APIClient(
+        CachingDeferredBackend(DeferredStubBackend()), "https://api.example.com"
     )
     assert_type(deferred_client.send(GetItem(item_id=1)), Deferred[Item])
 
