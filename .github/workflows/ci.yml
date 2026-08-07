@@ -3,8 +3,9 @@ name: CI
 on:
   push:
     branches: [main]
+  # no branch filter for pull requests: stacked PRs (based on another
+  # feature branch) must run CI too
   pull_request:
-    branches: [main]
 
 # cancel superseded runs of the same branch / PR
 concurrency:
