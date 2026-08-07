@@ -15,18 +15,22 @@ uv add "action0-client[httpx]"    # not on PyPI yet — install from GitHub for 
 **Highlights**:
 
 - One {py:class}`~action0.client.client.Client` /
-  {py:class}`~action0.client.api.APIClient`, three execution models: the
-  backend decides whether `send()` returns a value, an awaitable or a
-  Twisted `Deferred` — and the type checker knows which, including the
-  per-operation result type (`Item`, `Awaitable[Item]`, `Deferred[Item]`).
+  {py:class}`~action0.client.api.APIClient`, four execution models: the
+  backend decides whether `send()` returns a value, an awaitable, a
+  Twisted `Deferred` or a `concurrent.futures.Future` — and the type
+  checker knows which, including the per-operation result type (`Item`,
+  `Awaitable[Item]`, `Deferred[Item]`, `Future[Item]`).
 - One structural {py:class}`~action0.client.backend.Backend` protocol,
   generic over the execution model's wrapper type — implement two methods
   and anything can drive the same clients, *including execution models
   this library has never heard of* (`Client.send` returns whatever your
   backend's `send` returns). Built-in:
   [requests](https://requests.readthedocs.io/),
-  [httpx](https://www.python-httpx.org/) (sync + async) and
-  [Twisted](https://twisted.org/), each behind an optional dependency.
+  [httpx](https://www.python-httpx.org/) (sync + async),
+  [aiohttp](https://docs.aiohttp.org/) and
+  [Twisted](https://twisted.org/) — each behind an optional dependency —
+  plus two stdlib-only ones: `urllib` and a thread-pool backend returning
+  `concurrent.futures.Future` results.
 - Endpoints as typed dataclasses:
   {py:class}`~action0.client.operation.Operation` fixes method and path
   per class, the field specifiers of {py:mod}`action0.client.fields`

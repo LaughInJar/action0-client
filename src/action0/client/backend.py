@@ -55,6 +55,7 @@ from __future__ import annotations
 import time
 from abc import ABC
 from abc import abstractmethod
+from concurrent.futures import Future
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Awaitable
@@ -163,6 +164,12 @@ DeferredBackend: TypeAlias = "Backend[Deferred[Response]]"
 :py:class:`~action0.req.response.Response`. Built-in implementations:
 :py:class:`~action0.client.backends.twisted.TwistedBackend` and the test
 double :py:class:`~action0.client.testing.DeferredStubBackend`."""
+
+FuturesBackend: TypeAlias = Backend[Future[Response]]
+"""A thread-pool style backend: ``send`` returns a
+:py:class:`concurrent.futures.Future` of the
+:py:class:`~action0.req.response.Response`. Built-in implementation:
+:py:class:`~action0.client.backends.futures.ThreadPoolBackend`."""
 
 
 class _BaseBackend:

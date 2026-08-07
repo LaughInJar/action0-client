@@ -6,7 +6,7 @@ Everything public is importable from the package root:
 from action0.client import Client, APIClient
 from action0.client import Operation, JsonOperation
 from action0.client import body, header, json_body, json_field, path_param, query
-from action0.client import Backend, SyncBackend, AsyncBackend, DeferredBackend
+from action0.client import Backend, SyncBackend, AsyncBackend, DeferredBackend, FuturesBackend
 from action0.client import BackendT_co, SendResultT_co
 from action0.client import BaseSyncBackend, BaseAsyncBackend, BaseDeferredBackend
 from action0.client import Hook, LoggingHook
@@ -20,7 +20,10 @@ used:
 ```python
 from action0.client.backends.requests import RequestsBackend
 from action0.client.backends.httpx import HttpxBackend, AsyncHttpxBackend
+from action0.client.backends.aiohttp import AiohttpBackend
 from action0.client.backends.twisted import TwistedBackend
+from action0.client.backends.urllib import UrllibBackend
+from action0.client.backends.futures import ThreadPoolBackend
 from action0.client.testing import StubBackend, AsyncStubBackend, DeferredStubBackend
 ```
 
@@ -89,6 +92,21 @@ from action0.client.testing import StubBackend, AsyncStubBackend, DeferredStubBa
 
 ```{eval-rst}
 .. automodule:: action0.client.backends.httpx
+   :members:
+```
+
+```{eval-rst}
+.. automodule:: action0.client.backends.aiohttp
+   :members:
+```
+
+```{eval-rst}
+.. automodule:: action0.client.backends.urllib
+   :members:
+```
+
+```{eval-rst}
+.. automodule:: action0.client.backends.futures
    :members:
 ```
 

@@ -29,7 +29,8 @@ stub backends for testing.
 
 A backend implements one structural protocol, `Backend[W]`, generic over
 what its `send` wraps the response in (`W` is `Response`,
-`Awaitable[Response]`, `Deferred[Response]`, ...); `Client` sends
+`Awaitable[Response]`, `Deferred[Response]`, `Future[Response]`, ...);
+`Client` sends
 [action0-req](https://github.com/LaughInJar/action0-req) `Request`s
 through it, and the return type of `send()` follows the backend:
 
@@ -133,7 +134,8 @@ models, runnable demo) lives in
 
 Not published to PyPI yet; install straight from GitHub. The HTTP
 libraries are optional extras — pick what you need (`requests`, `httpx`,
-`twisted`, `all`):
+`aiohttp`, `twisted`, `all`); the stdlib `urllib` and thread-pool backends
+work without any extra:
 
 ```shell
 uv add "action0-client[httpx] @ git+https://github.com/LaughInJar/action0-client"
@@ -167,6 +169,15 @@ publishes to PyPI via trusted publishing:
 git tag v0.1.0
 git push origin v0.1.0
 ```
+
+## AI-assisted development
+
+In the spirit of transparency: most of this project's code, tests and
+documentation are written by [Claude Code](https://claude.com/claude-code),
+Anthropic's coding agent — under human direction and review. The designs
+are specified, discussed and iterated by a human, and every change is
+reviewed before it lands in `main` or in a release. AI-authored commits
+carry a `Co-Authored-By: Claude ...` trailer.
 
 ## About action0
 
