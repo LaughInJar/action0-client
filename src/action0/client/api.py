@@ -6,6 +6,7 @@ and default headers, and sends typed
 
 from __future__ import annotations
 
+from concurrent.futures import Future
 from typing import TYPE_CHECKING
 from typing import Any
 from typing import Awaitable
@@ -167,6 +168,9 @@ class APIClient(Generic[BackendT_co]):
     ) -> Awaitable[R]: ...
 
     @overload
+    def send(self: APIClient[Backend[Future[Response]]], operation: Operation[R]) -> Future[R]: ...
+
+    @overload
     def send(self, operation: Operation[R]) -> Any: ...
 
     def send(self, operation: Operation[Any]) -> Any:
@@ -182,12 +186,12 @@ class APIClient(Generic[BackendT_co]):
         :param operation: the operation to execute
         :return: the parsed result, wrapped according to the backend's
                  execution model: plain for a sync backend, awaitable for
-                 an async backend, a Deferred for a Twisted backend —
-                 those three are typed precisely; any other execution
-                 model works the same way but is typed ``Any`` (for
-                 precise typing of a custom wrapper, subclass and
-                 re-declare ``send`` — see the *Other execution models*
-                 section of the guide)
+                 an async backend, a Deferred for a Twisted backend, a
+                 Future for a thread-pool backend — those four are typed
+                 precisely; any other execution model works the same way
+                 but is typed ``Any`` (for precise typing of a custom
+                 wrapper, subclass and re-declare ``send`` — see the
+                 *Other execution models* section of the guide)
         :raises action0.client.errors.ClientError: transport failures and
                 response parsing failures (for async and Twisted backends
                 they arrive at ``await`` time / in the errback instead of

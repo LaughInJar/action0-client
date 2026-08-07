@@ -179,6 +179,29 @@ async def async_usage() -> None:
         print(pets)
 
 
+async def aiohttp_usage() -> None:
+    """The same operations with the aiohttp backend — drop-in for httpx."""
+    from action0.client.backends.aiohttp import AiohttpBackend
+
+    async with AiohttpBackend() as backend:
+        client = PetStoreClient(backend, token="hunter2")
+        pets: list[Pet] = await client.send(SearchPets(q="pony"))
+        print(pets)
+
+
+def parallel_usage() -> None:
+    """Fan out requests from plain sync code via the thread-pool backend."""
+    from concurrent.futures import Future
+
+    from action0.client.backends.futures import ThreadPoolBackend
+    from action0.client.backends.requests import RequestsBackend
+
+    with RequestsBackend() as inner, ThreadPoolBackend(inner) as backend:
+        client = PetStoreClient(backend, token="hunter2")
+        futures: list[Future[Pet]] = [client.send(GetPet(pet_id=pet_id)) for pet_id in range(3)]
+        print([future.result() for future in futures])
+
+
 def twisted_usage() -> None:
     """The same operations on Twisted, as Deferreds."""
     from typing import cast

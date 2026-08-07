@@ -13,13 +13,17 @@ backend(s) you want:
 ```shell
 uv add "action0-client[httpx] @ git+https://github.com/LaughInJar/action0-client"
 
-# extras: requests, httpx, twisted, all
+# extras: requests, httpx, aiohttp, twisted, all
 pip install "action0-client[requests,twisted] @ git+https://github.com/LaughInJar/action0-client"
 ```
 
-Without extras you get the core library: the protocols, clients,
-operations and test stubs — enough to define APIs and test them; only the
-real I/O needs one of the HTTP libraries.
+Without extras you get the core library — clients, operations, test stubs
+— plus two stdlib-only backends that need no extra at all:
+{py:class}`~action0.client.backends.urllib.UrllibBackend` (basic sync
+HTTP via `urllib.request`) and
+{py:class}`~action0.client.backends.futures.ThreadPoolBackend` (parallel
+sends over a thread pool). For real workloads pick one of the library
+backends.
 
 ## The pieces
 
@@ -98,9 +102,11 @@ reactor.run()
 ```
 
 There is also a sync httpx backend
-({py:class}`~action0.client.backends.httpx.HttpxBackend`) — requests and
-httpx are interchangeable here, use whichever your project already
-depends on.
+({py:class}`~action0.client.backends.httpx.HttpxBackend`) and an
+[aiohttp](https://docs.aiohttp.org/) backend
+({py:class}`~action0.client.backends.aiohttp.AiohttpBackend`) that drops
+in exactly like the async httpx one — use whichever library your project
+already depends on.
 
 Runnable stub version (this is what the type checker sees, too — `send()`
 returns a plain {py:class}`~action0.req.response.Response` because the
@@ -137,10 +143,37 @@ The counterparts:
 {py:class}`~action0.client.backends.requests.RequestsBackend`
 (`requests.Session`),
 {py:class}`~action0.client.backends.httpx.AsyncHttpxBackend`
-(`httpx.AsyncClient`, `async with` / `aclose()`) and
+(`httpx.AsyncClient`, `async with` / `aclose()`),
+{py:class}`~action0.client.backends.aiohttp.AiohttpBackend`
+(`aiohttp.ClientSession`, created lazily on the first send when none is
+passed),
+{py:class}`~action0.client.backends.urllib.UrllibBackend` (a stdlib
+`urllib.request` opener — zero dependencies, for simple needs) and
 {py:class}`~action0.client.backends.twisted.TwistedBackend`
 (`twisted.web.client.Agent`, plus a `reactor=` for the timeout clock).
 All of them accept `timeout=`, `follow_redirects=` and `hooks=`.
+
+### Parallel requests from sync code
+
+{py:class}`~action0.client.backends.futures.ThreadPoolBackend` (stdlib,
+no extra) wraps any synchronous backend and runs its sends on a
+`ThreadPoolExecutor` — its execution model is
+`concurrent.futures.Future`, and the types follow, including through
+`APIClient`:
+
+```python
+from action0.client import APIClient
+from action0.client.backends.futures import ThreadPoolBackend
+from action0.client.backends.requests import RequestsBackend
+
+with RequestsBackend() as inner, ThreadPoolBackend(inner) as backend:
+    client = APIClient(backend, "https://api.example.com/v1")
+    futures = [client.send(GetItem(item_id=item_id)) for item_id in range(100)]
+    items = [future.result() for future in futures]  # each one a Future[Item]
+```
+
+Hooks belong on the *wrapped* backend (they run on the pool threads,
+around the actual I/O); the wrapper itself stays out of the way.
 
 ## Instrumentation hooks
 
@@ -500,12 +533,11 @@ an `async def _send` / a Deferred-returning `_send`.
 ### Other execution models
 
 The protocol is generic over the wrapper type, so backends are not limited
-to the three shipped execution models. Say your application runs sends on
-a thread pool and wants `concurrent.futures.Future` results:
+to the shipped execution models (sync, awaitable, Deferred, Future). Say
+your framework has a result wrapper of its own:
 
 ```python
-from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Callable, TypeVar
+from typing import Callable, Generic, TypeVar
 from action0.client import Client
 from action0.req import Request, Response
 
@@ -513,26 +545,21 @@ T = TypeVar("T")
 S = TypeVar("S")
 
 
-class FutureBackend:
-    """Runs a sync backend's sends on a thread pool."""
+class Box(Generic[T]):
+    """Stand-in for your framework's own result wrapper."""
 
-    def __init__(self, inner: Client[Response], pool: ThreadPoolExecutor) -> None:
-        self._inner = inner
-        self._pool = pool
 
-    def send(self, request: Request) -> Future[Response]:
-        return self._pool.submit(self._inner.send, request)
-
-    def map(self, result: Future[T], fn: Callable[[T], S]) -> Future[S]:
-        return self._pool.submit(lambda: fn(result.result()))
+class BoxBackend:
+    def send(self, request: Request) -> Box[Response]: ...
+    def map(self, result: Box[T], fn: Callable[[T], S]) -> Box[S]: ...
 ```
 
-`Client(FutureBackend(...)).send(request)` is a `Future[Response]` — the
-return type is derived from the backend, no client code involved. For
+`Client(BoxBackend()).send(request)` is a `Box[Response]` — the return
+type is derived from the backend, no client code involved. For
 {py:meth}`APIClient.send <action0.client.api.APIClient.send>` the parsed
 results of such a backend are typed `Any` (rewriting "the wrapper, around
 the operation's result type" for an *arbitrary* wrapper would need
-higher-kinded types, which Python doesn't have — only the three shipped
+higher-kinded types, which Python doesn't have — only the shipped
 wrappers are spelled out as overloads); everything works normally at
 runtime.
 
@@ -547,23 +574,23 @@ from action0.client import APIClient, Backend, Operation
 from action0.req import Response
 
 R = TypeVar("R")
-FutureBackendT_co = TypeVar("FutureBackendT_co", bound=Backend[Future[Response]], covariant=True)
+BoxBackendT_co = TypeVar("BoxBackendT_co", bound=Backend[Box[Response]], covariant=True)
 
 
-class FutureAPIClient(APIClient[FutureBackendT_co]):
-    """An APIClient whose send() results are precisely typed Futures."""
+class BoxAPIClient(APIClient[BoxBackendT_co]):
+    """An APIClient whose send() results are precisely typed Boxes."""
 
     # pyright ignore: its override check compares against every parent
     # overload without filtering by this subclass's self type (none of
-    # the shipped-wrapper overloads can ever apply to a Future backend)
+    # the shipped-wrapper overloads can ever apply to a Box backend)
     def send(  # pyright: ignore[reportIncompatibleMethodOverride]
         self, operation: Operation[R]
-    ) -> Future[R]:
-        return cast(Future[R], super().send(operation))
+    ) -> Box[R]:
+        return cast(Box[R], super().send(operation))
 ```
 
-Now `FutureAPIClient(FutureBackend(...), "https://api.example.com")` sends
-an `Operation[Item]` as a `Future[Item]` — for every operation, without
+Now `BoxAPIClient(BoxBackend(), "https://api.example.com")` sends an
+`Operation[Item]` as a `Box[Item]` — for every operation, without
 per-call casts, and the concrete backend type stays visible on
 `client.backend`. mypy and ty accept the override as-is; pyright wants the
 one suppression shown above. The pattern is pinned in the typing test

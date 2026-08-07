@@ -26,6 +26,7 @@ from .backend import BaseAsyncBackend
 from .backend import BaseDeferredBackend
 from .backend import BaseSyncBackend
 from .backend import DeferredBackend
+from .backend import FuturesBackend
 from .backend import SendResultT_co
 from .backend import SyncBackend
 from .client import Client
@@ -61,6 +62,7 @@ __all__ = [
     "ClientError",
     "DeferredBackend",
     "FieldSpec",
+    "FuturesBackend",
     "Hook",
     "JsonOperation",
     "Location",

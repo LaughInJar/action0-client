@@ -13,7 +13,7 @@ dependencies = [
     "action0-req",
     "action0-url",
 ]
-keywords = ["http", "client", "api", "typed", "sync", "async", "twisted", "requests", "httpx"]
+keywords = ["http", "client", "api", "typed", "sync", "async", "twisted", "requests", "httpx", "aiohttp"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -30,7 +30,8 @@ classifiers = [
 ]
 
 # the HTTP libraries are optional: pick the extras matching the backend(s)
-# you actually use, e.g. `pip install "action0-client[twisted]"`
+# you actually use, e.g. `pip install "action0-client[twisted]"` (the
+# urllib and thread-pool backends are stdlib-only and need no extra)
 [project.optional-dependencies]
 requests = [
     "requests>=2.32",
@@ -38,12 +39,15 @@ requests = [
 httpx = [
     "httpx>=0.27",
 ]
+aiohttp = [
+    "aiohttp>=3.9",
+]
 twisted = [
     # the "tls" extra pulls pyOpenSSL + service-identity so https works
     "twisted[tls]>=24.7",
 ]
 all = [
-    "action0-client[requests,httpx,twisted]",
+    "action0-client[requests,httpx,aiohttp,twisted]",
 ]
 
 [project.urls]
@@ -64,6 +68,7 @@ action0-url = { git = "https://github.com/LaughInJar/action0-url", branch = "mai
 dev = [
     # all optional backend libraries are dev dependencies: the tests and the
     # type checkers need them
+    "aiohttp>=3.9",
     "httpx>=0.27",
     "ipython>=8.39.0",
     "mypy>=2.3.0",

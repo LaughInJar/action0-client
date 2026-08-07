@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 from typing import Awaitable
 from typing import Callable
+from typing import Generic
 from typing import TypeVar
 from typing import assert_type
 from typing import cast
@@ -27,10 +28,13 @@ from action0.client import Client
 from action0.client import JsonOperation
 from action0.client import Operation
 from action0.client import path_param
+from action0.client.backends.aiohttp import AiohttpBackend
+from action0.client.backends.futures import ThreadPoolBackend
 from action0.client.backends.httpx import AsyncHttpxBackend
 from action0.client.backends.httpx import HttpxBackend
 from action0.client.backends.requests import RequestsBackend
 from action0.client.backends.twisted import TwistedBackend
+from action0.client.backends.urllib import UrllibBackend
 from action0.client.testing import AsyncStubBackend
 from action0.client.testing import DeferredStubBackend
 from action0.client.testing import StubBackend
@@ -65,7 +69,20 @@ class GetItem(JsonOperation[Item]):
         return Item(id=data["id"], name=data["name"])
 
 
-class FutureBackend:
+class Box(Generic[T]):
+    """A wrapper type of its own — no shipped overload knows it."""
+
+    def __init__(self, value: T) -> None:
+        self._value = value
+
+    def unwrap(self) -> T:
+        """
+        :return: the wrapped value
+        """
+        return self._value
+
+
+class BoxBackend:
     """
     A backend with an execution model this library has never heard of —
     the openness regression test: it must satisfy the ``Backend`` protocol
@@ -73,18 +90,18 @@ class FutureBackend:
     wrapper type.
     """
 
-    def send(self, request: Request) -> "Future[Response]":
+    def send(self, request: Request) -> "Box[Response]":
         """
         :param request: the request to send
-        :return: a Future of the response
+        :return: a Box of the response
         """
         raise NotImplementedError
 
-    def map(self, result: "Future[T]", fn: Callable[[T], S]) -> "Future[S]":
+    def map(self, result: "Box[T]", fn: Callable[[T], S]) -> "Box[S]":
         """
-        :param result: a Future as returned by :py:meth:`send`
-        :param fn: the function to apply to the eventual value
-        :return: a Future of the return value of ``fn``
+        :param result: a Box as returned by :py:meth:`send`
+        :param fn: the function to apply to the boxed value
+        :return: a Box of the return value of ``fn``
         """
         raise NotImplementedError
 
@@ -93,6 +110,7 @@ def check_client_sync(request: Request) -> None:
     """A sync backend makes Client.send return the plain Response."""
     assert_type(Client(RequestsBackend()).send(request), Response)
     assert_type(Client(HttpxBackend()).send(request), Response)
+    assert_type(Client(UrllibBackend()).send(request), Response)
     assert_type(Client(StubBackend()).send(request), Response)
     # the client is generic over the wrapper, so the backend is exposed
     # as the protocol, not its concrete class
@@ -103,6 +121,8 @@ async def check_client_async(request: Request) -> None:
     """Awaiting an async backend's send yields the plain Response."""
     response = await Client(AsyncHttpxBackend()).send(request)
     assert_type(response, Response)
+    aio_response = await Client(AiohttpBackend()).send(request)
+    assert_type(aio_response, Response)
     stubbed = await Client(AsyncStubBackend()).send(request)
     assert_type(stubbed, Response)
 
@@ -113,19 +133,27 @@ def check_client_deferred(request: Request) -> None:
     assert_type(Client(DeferredStubBackend()).send(request), Deferred[Response])
 
 
+def check_client_future(request: Request) -> None:
+    """A thread-pool backend makes Client.send return a Future Response."""
+    assert_type(Client(ThreadPoolBackend(StubBackend())).send(request), Future[Response])
+
+
 def check_client_custom_wrapper(request: Request) -> None:
     """
     An execution model the library has never heard of flows through
     Client fully typed — the return type is derived from the backend,
     not enumerated in the client.
     """
-    assert_type(Client(FutureBackend()).send(request), Future[Response])
+    assert_type(Client(BoxBackend()).send(request), Box[Response])
 
 
 def check_api_client_sync() -> None:
     """A sync backend makes APIClient.send return the parsed result."""
     client = APIClient(RequestsBackend(), "https://api.example.com")
     assert_type(client.send(GetItem(item_id=1)), Item)
+    assert_type(
+        APIClient(UrllibBackend(), "https://api.example.com").send(GetItem(item_id=1)), Item
+    )
     # unlike Client, APIClient keeps the backend's concrete type
     assert_type(client.backend, RequestsBackend)
 
@@ -134,11 +162,13 @@ def check_api_client_async() -> None:
     """An async backend wraps the parsed result in an awaitable."""
     client = APIClient(AsyncHttpxBackend(), "https://api.example.com")
     assert_type(client.send(GetItem(item_id=1)), Awaitable[Item])
+    aio_client = APIClient(AiohttpBackend(), "https://api.example.com")
+    assert_type(aio_client.send(GetItem(item_id=1)), Awaitable[Item])
 
 
 async def check_api_client_awaited() -> None:
     """Awaiting the async result yields the parsed result."""
-    client = APIClient(AsyncHttpxBackend(), "https://api.example.com")
+    client = APIClient(AiohttpBackend(), "https://api.example.com")
     item = await client.send(GetItem(item_id=1))
     assert_type(item, Item)
 
@@ -149,20 +179,26 @@ def check_api_client_deferred() -> None:
     assert_type(client.send(GetItem(item_id=1)), Deferred[Item])
 
 
+def check_api_client_future() -> None:
+    """A thread-pool backend wraps the parsed result in a Future."""
+    client = APIClient(ThreadPoolBackend(StubBackend()), "https://api.example.com")
+    assert_type(client.send(GetItem(item_id=1)), Future[Item])
+
+
 def check_api_client_custom_wrapper() -> None:
     """
     Unknown execution models are *usable* on APIClient — the send result
     falls back to Any (the wrapper-around-R rewrite is inexpressible
     without higher-kinded types) instead of being rejected.
     """
-    client = APIClient(FutureBackend(), "https://api.example.com")
+    client = APIClient(BoxBackend(), "https://api.example.com")
     assert_type(client.send(GetItem(item_id=1)), Any)
 
 
-FutureBackendT_co = TypeVar("FutureBackendT_co", bound="Backend[Future[Response]]", covariant=True)
+BoxBackendT_co = TypeVar("BoxBackendT_co", bound="Backend[Box[Response]]", covariant=True)
 
 
-class FutureAPIClient(APIClient[FutureBackendT_co]):
+class BoxAPIClient(APIClient[BoxBackendT_co]):
     """
     The documented escape hatch for custom execution models: subclass
     APIClient and re-declare send() with the wrapper spelled out — the one
@@ -171,23 +207,23 @@ class FutureAPIClient(APIClient[FutureBackendT_co]):
 
     # pyright ignore: its override check compares against every parent
     # overload without filtering by this subclass's self type (none of the
-    # shipped-wrapper overloads can ever apply to a Future backend)
+    # shipped-wrapper overloads can ever apply to a Box backend)
     def send(  # pyright: ignore[reportIncompatibleMethodOverride]
         self, operation: "Operation[R]"
-    ) -> "Future[R]":
+    ) -> "Box[R]":
         """
         :param operation: the operation to execute
-        :return: a Future of the parsed result
+        :return: a Box of the parsed result
         """
-        return cast("Future[R]", super().send(operation))
+        return cast("Box[R]", super().send(operation))
 
 
 def check_api_client_subclass_escape_hatch() -> None:
     """A re-typed subclass makes a custom wrapper precise on ring 1 too."""
-    client = FutureAPIClient(FutureBackend(), "https://api.example.com")
-    assert_type(client.send(GetItem(item_id=1)), Future[Item])
+    client = BoxAPIClient(BoxBackend(), "https://api.example.com")
+    assert_type(client.send(GetItem(item_id=1)), Box[Item])
     # the concrete backend type survives the subclass
-    assert_type(client.backend, FutureBackend)
+    assert_type(client.backend, BoxBackend)
 
 
 def check_only_backends_accepted() -> None:
