@@ -19,11 +19,11 @@ uv add "action0-client[httpx]"    # not on PyPI yet — install from GitHub for 
   backend decides whether `send()` returns a value, an awaitable or a
   Twisted `Deferred` — and the type checker knows which, including the
   per-operation result type (`Item`, `Awaitable[Item]`, `Deferred[Item]`).
-- Backends are {py:class}`~typing.Protocol`s
-  ({py:class}`~action0.client.backend.SyncBackend` /
-  {py:class}`~action0.client.backend.AsyncBackend` /
-  {py:class}`~action0.client.backend.DeferredBackend`) — implement two
-  methods and anything can drive the same clients. Built-in:
+- One structural {py:class}`~action0.client.backend.Backend` protocol,
+  generic over the execution model's wrapper type — implement two methods
+  and anything can drive the same clients, *including execution models
+  this library has never heard of* (`Client.send` returns whatever your
+  backend's `send` returns). Built-in:
   [requests](https://requests.readthedocs.io/),
   [httpx](https://www.python-httpx.org/) (sync + async) and
   [Twisted](https://twisted.org/), each behind an optional dependency.

@@ -1,6 +1,6 @@
 """
 The `requests <https://requests.readthedocs.io/>`_ backend — a
-:py:class:`~action0.client.backend.SyncBackend`.
+:py:data:`~action0.client.backend.SyncBackend`.
 
 Requires the ``requests`` extra: ``pip install "action0-client[requests]"``.
 """

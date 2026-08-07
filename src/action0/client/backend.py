@@ -1,34 +1,39 @@
 """
-The backend abstraction: the protocols a backend implements and the base
+The backend abstraction: the protocol a backend implements and the base
 classes that make implementing one easy.
 
 A backend is the pluggable piece that performs the actual HTTP I/O. It
 takes an :py:class:`action0.req.Request` and produces an
-:py:class:`action0.req.Response` — but *how* the response is delivered
-depends on the execution model of the underlying HTTP library:
+:py:class:`action0.req.Response` — wrapped in whatever its execution
+model dictates: a sync backend returns the ``Response`` itself, an
+asyncio backend an ``Awaitable[Response]``, a Twisted backend a
+``Deferred[Response]``, and a custom backend may use any other wrapper.
 
-- a **sync** backend returns the ``Response`` directly,
-- an **async** backend returns an ``Awaitable[Response]``,
-- a **Twisted** backend returns a ``Deferred[Response]``.
+There is exactly one protocol, :py:class:`Backend`, generic over that
+wrapper type: ``Backend[Response]`` describes sync backends,
+``Backend[Awaitable[Response]]`` asyncio ones, and so on — the aliases
+:py:data:`SyncBackend`, :py:data:`AsyncBackend` and
+:py:data:`DeferredBackend` name the shipped three. A backend implements
+the protocol purely structurally, no registration or inheritance
+required. Because the wrapper is the protocol's type parameter, generic
+code *derives* its types from the backend it is given:
+:py:meth:`Client.send <action0.client.client.Client.send>` returns
+exactly what the backend's ``send`` returns — including wrapper types
+this library has never heard of.
 
-Python's type system cannot abstract over "the wrapper type" (there are no
-higher-kinded types), so there is one :py:class:`typing.Protocol` per
-execution model: :py:class:`SyncBackend`, :py:class:`AsyncBackend` and
-:py:class:`DeferredBackend`. A backend implements exactly one of them —
-purely structurally, no registration or inheritance required.
+The protocol has two methods:
 
-Each protocol has two methods:
-
-- ``send(request)`` performs the I/O and returns the (wrapped) response.
+- ``send(request)`` performs the I/O and returns the wrapped response.
 - ``map(result, fn)`` applies a function *inside* the wrapper: a sync
   backend just calls ``fn(result)``, an async backend awaits first, a
-  Twisted backend uses ``addCallback``. This is the composition hook that
-  lets generic code — most importantly
-  :py:meth:`action0.client.api.APIClient.send` — attach response parsing
-  to a send without knowing the execution model. It also keeps the three
-  protocols structurally distinct, which is what makes the return-type
-  overloads of :py:class:`~action0.client.client.Client` and
-  :py:class:`~action0.client.api.APIClient` resolve to the right wrapper.
+  Twisted backend uses ``addCallback``. This is the runtime composition
+  hook that lets :py:meth:`APIClient.send
+  <action0.client.api.APIClient.send>` attach response parsing to a send
+  without knowing the execution model. On the protocol it is typed
+  loosely (``Any``): stating "the same wrapper, around a different value
+  type" for an *arbitrary* wrapper would require higher-kinded types,
+  which Python's type system does not have. Implementations declare
+  their ``map`` precisely for their own wrapper — see the base classes.
 
 The base classes (:py:class:`BaseSyncBackend`, :py:class:`BaseAsyncBackend`,
 :py:class:`BaseDeferredBackend`) implement ``send`` as a template around an
@@ -51,6 +56,7 @@ import time
 from abc import ABC
 from abc import abstractmethod
 from typing import TYPE_CHECKING
+from typing import Any
 from typing import Awaitable
 from typing import Callable
 from typing import Iterable
@@ -72,112 +78,91 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 S = TypeVar("S")
 
+SendResultT_co = TypeVar("SendResultT_co", covariant=True)
+"""What a backend's ``send`` returns: the response, wrapped according to
+the backend's execution model — ``Response``, ``Awaitable[Response]``,
+``Deferred[Response]``, or any custom wrapper. :py:class:`Backend` and
+:py:class:`~action0.client.client.Client` are generic over it."""
 
-class SyncBackend(Protocol):
+
+class Backend(Protocol[SendResultT_co]):
     """
-    The protocol of a synchronous backend: ``send`` blocks and returns the
-    :py:class:`~action0.req.response.Response` directly.
+    The one protocol every backend implements, generic over what its
+    ``send`` wraps the :py:class:`~action0.req.response.Response` in —
+    the backend's *execution model*:
 
-    Built-in implementations:
-    :py:class:`~action0.client.backends.requests.RequestsBackend`,
-    :py:class:`~action0.client.backends.httpx.HttpxBackend` and the test
-    double :py:class:`~action0.client.testing.StubBackend`.
+    - ``Backend[Response]`` — synchronous (:py:data:`SyncBackend`)
+    - ``Backend[Awaitable[Response]]`` — asyncio (:py:data:`AsyncBackend`)
+    - ``Backend[Deferred[Response]]`` — Twisted (:py:data:`DeferredBackend`)
+    - ``Backend[<anything else>]`` — your own execution model
+
+    The clients derive their ``send`` return types from this type
+    parameter, so plugging in a different backend changes the static
+    types without any client code changing.
     """
 
-    def send(self, request: Request) -> Response:
+    def send(self, request: Request) -> SendResultT_co:
         """
-        Send the request and block until the response arrived.
+        Send the request.
 
         :param request: the request to send
-        :return: the response
+        :return: the response, wrapped according to the execution model —
+                 e.g. returned directly (sync), as an awaitable (asyncio)
+                 or as a Deferred (Twisted)
         :raises action0.client.errors.TransportError: if no response could
-                be obtained
+                be obtained (async-style backends deliver the error
+                through their wrapper instead of raising here)
         """
         ...
 
-    def map(self, result: T, fn: Callable[[T], S]) -> S:
+    def map(self, result: Any, fn: Callable[[Any], Any]) -> Any:
         """
-        Apply a function to a result of :py:meth:`send` — synchronously
-        that is simply ``fn(result)``.
+        Apply a function *inside* the wrapper: for a ``result`` that
+        (eventually) holds a value ``x``, return the same kind of wrapper
+        (eventually) holding ``fn(x)`` — a plain call for sync backends,
+        await-then-call for asyncio, ``addCallback`` for Twisted.
+
+        This is the composition hook :py:meth:`APIClient.send
+        <action0.client.api.APIClient.send>` uses to attach response
+        parsing. It is typed loosely here because "the same wrapper,
+        around a different value type" is not expressible for an
+        arbitrary wrapper (Python has no higher-kinded types);
+        implementations declare it precisely for their own wrapper, like
+        the base classes do.
 
         :param result: a value as returned by :py:meth:`send`
-        :param fn: the function to apply
-        :return: the return value of ``fn``
+        :param fn: the function to apply to the wrapped value
+        :return: the wrapped return value of ``fn``
         """
         ...
 
 
-class AsyncBackend(Protocol):
-    """
-    The protocol of an asyncio backend: ``send`` returns an awaitable of
-    the :py:class:`~action0.req.response.Response`.
+BackendT_co = TypeVar("BackendT_co", covariant=True, bound=Backend[Any])
+"""A concrete backend type; what :py:class:`~action0.client.api.APIClient`
+is generic over (so ``client.backend`` keeps the concrete type). Covariant
+so that e.g. an ``APIClient[RequestsBackend]`` is also an
+``APIClient[Backend[Response]]`` — that is what resolves the ``send``
+overloads to the right wrapper."""
 
-    Built-in implementations:
-    :py:class:`~action0.client.backends.httpx.AsyncHttpxBackend` and the
-    test double :py:class:`~action0.client.testing.AsyncStubBackend`.
-    """
+SyncBackend: TypeAlias = Backend[Response]
+"""A synchronous backend: ``send`` blocks and returns the
+:py:class:`~action0.req.response.Response` directly. Built-in
+implementations: :py:class:`~action0.client.backends.requests.RequestsBackend`,
+:py:class:`~action0.client.backends.httpx.HttpxBackend` and the test
+double :py:class:`~action0.client.testing.StubBackend`."""
 
-    def send(self, request: Request) -> Awaitable[Response]:
-        """
-        Start sending the request.
+AsyncBackend: TypeAlias = Backend[Awaitable[Response]]
+"""An asyncio backend: ``send`` returns an awaitable of the
+:py:class:`~action0.req.response.Response`. Built-in implementations:
+:py:class:`~action0.client.backends.httpx.AsyncHttpxBackend` and the test
+double :py:class:`~action0.client.testing.AsyncStubBackend`."""
 
-        :param request: the request to send
-        :return: an awaitable resolving to the response
-        :raises action0.client.errors.TransportError: raised at ``await``
-                time if no response could be obtained
-        """
-        ...
-
-    def map(self, result: Awaitable[T], fn: Callable[[T], S]) -> Awaitable[S]:
-        """
-        Apply a function inside an awaitable result of :py:meth:`send`:
-        the returned awaitable resolves to ``fn`` of what ``result``
-        resolves to.
-
-        :param result: an awaitable as returned by :py:meth:`send`
-        :param fn: the function to apply to the awaited value
-        :return: an awaitable of the return value of ``fn``
-        """
-        ...
-
-
-class DeferredBackend(Protocol):
-    """
-    The protocol of a Twisted backend: ``send`` returns a
-    :py:class:`~twisted.internet.defer.Deferred` firing with the
-    :py:class:`~action0.req.response.Response`.
-
-    Built-in implementations:
-    :py:class:`~action0.client.backends.twisted.TwistedBackend` and the
-    test double :py:class:`~action0.client.testing.DeferredStubBackend`.
-    """
-
-    def send(self, request: Request) -> Deferred[Response]:
-        """
-        Start sending the request.
-
-        :param request: the request to send
-        :return: a Deferred firing with the response, or failing with a
-                 :py:class:`~action0.client.errors.TransportError`
-        """
-        ...
-
-    def map(self, result: Deferred[T], fn: Callable[[T], S]) -> Deferred[S]:
-        """
-        Apply a function inside a Deferred result of :py:meth:`send` —
-        Twisted's native ``addCallback``.
-
-        :param result: a Deferred as returned by :py:meth:`send`
-        :param fn: the function to apply to the eventual value
-        :return: a Deferred firing with the return value of ``fn``
-        """
-        ...
-
-
-Backend: TypeAlias = SyncBackend | AsyncBackend | DeferredBackend
-"""Anything that can be plugged into a :py:class:`~action0.client.client.Client`
-or :py:class:`~action0.client.api.APIClient`: a backend of any of the three
-execution models."""
+DeferredBackend: TypeAlias = "Backend[Deferred[Response]]"
+"""A Twisted backend: ``send`` returns a
+:py:class:`~twisted.internet.defer.Deferred` firing with the
+:py:class:`~action0.req.response.Response`. Built-in implementations:
+:py:class:`~action0.client.backends.twisted.TwistedBackend` and the test
+double :py:class:`~action0.client.testing.DeferredStubBackend`."""
 
 
 class _BaseBackend:
@@ -256,7 +241,7 @@ class _BaseBackend:
 
 class BaseSyncBackend(_BaseBackend, ABC):
     """
-    Base class for :py:class:`SyncBackend` implementations: subclasses only
+    Base class for :py:data:`SyncBackend` implementations: subclasses only
     implement :py:meth:`_send` with the raw HTTP I/O and inherit the hook
     and error-translation plumbing.
 
@@ -331,7 +316,7 @@ class BaseSyncBackend(_BaseBackend, ABC):
 
 class BaseAsyncBackend(_BaseBackend, ABC):
     """
-    Base class for :py:class:`AsyncBackend` implementations: subclasses only
+    Base class for :py:data:`AsyncBackend` implementations: subclasses only
     implement the coroutine :py:meth:`_send` with the raw HTTP I/O and
     inherit the hook and error-translation plumbing.
 
@@ -412,7 +397,7 @@ class BaseAsyncBackend(_BaseBackend, ABC):
 
 class BaseDeferredBackend(_BaseBackend, ABC):
     """
-    Base class for :py:class:`DeferredBackend` implementations: subclasses
+    Base class for :py:data:`DeferredBackend` implementations: subclasses
     only implement :py:meth:`_send` returning a
     :py:class:`~twisted.internet.defer.Deferred` of the response and inherit
     the hook and error-translation plumbing.

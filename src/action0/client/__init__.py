@@ -7,8 +7,8 @@ or on Twisted — only the backend changes, and the static types follow it.
 
 - Ring 0 — raw HTTP: :py:class:`Client` sends
   :py:class:`action0.req.Request` instances through a backend
-  (:py:class:`SyncBackend` / :py:class:`AsyncBackend` /
-  :py:class:`DeferredBackend`).
+  (:py:data:`SyncBackend` / :py:data:`AsyncBackend` /
+  :py:data:`DeferredBackend`).
 - Ring 1 — typed APIs: :py:class:`Operation` /
   :py:class:`JsonOperation` describe endpoints as dataclasses,
   :py:class:`APIClient` sends them and returns parsed, typed results.
@@ -21,12 +21,13 @@ behind an optional dependency), the test doubles in
 from .api import APIClient
 from .backend import AsyncBackend
 from .backend import Backend
+from .backend import BackendT_co
 from .backend import BaseAsyncBackend
 from .backend import BaseDeferredBackend
 from .backend import BaseSyncBackend
 from .backend import DeferredBackend
+from .backend import SendResultT_co
 from .backend import SyncBackend
-from .client import BackendT_co
 from .client import Client
 from .errors import APIError
 from .errors import ClientError
@@ -65,6 +66,7 @@ __all__ = [
     "Location",
     "LoggingHook",
     "Operation",
+    "SendResultT_co",
     "SyncBackend",
     "TimeoutError",
     "TransportError",

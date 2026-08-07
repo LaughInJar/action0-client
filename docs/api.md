@@ -6,7 +6,8 @@ Everything public is importable from the package root:
 from action0.client import Client, APIClient
 from action0.client import Operation, JsonOperation
 from action0.client import body, header, json_body, json_field, path_param, query
-from action0.client import SyncBackend, AsyncBackend, DeferredBackend, Backend, BackendT_co
+from action0.client import Backend, SyncBackend, AsyncBackend, DeferredBackend
+from action0.client import BackendT_co, SendResultT_co
 from action0.client import BaseSyncBackend, BaseAsyncBackend, BaseDeferredBackend
 from action0.client import Hook, LoggingHook
 from action0.client import ClientError, TransportError, TimeoutError, APIError
@@ -31,7 +32,7 @@ from action0.client.testing import StubBackend, AsyncStubBackend, DeferredStubBa
    :special-members: __repr__
 ```
 
-## Backend protocols and base classes
+## Backend protocol and base classes
 
 ```{eval-rst}
 .. automodule:: action0.client.backend

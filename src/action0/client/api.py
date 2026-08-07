@@ -11,18 +11,16 @@ from typing import Any
 from typing import Awaitable
 from typing import Generic
 from typing import TypeVar
-from typing import cast
 from typing import overload
 
 from action0.req import Headers
 from action0.req import Request
+from action0.req import Response
 from action0.req.headers import HeaderTypes
 from action0.url import Url
 
-from .backend import AsyncBackend
-from .backend import DeferredBackend
-from .backend import SyncBackend
-from .client import BackendT_co
+from .backend import Backend
+from .backend import BackendT_co
 from .operation import Operation
 
 if TYPE_CHECKING:
@@ -49,8 +47,11 @@ class APIClient(Generic[BackendT_co]):
     - ``Awaitable[Item]`` with an async backend,
     - ``Deferred[Item]`` with a Twisted backend
 
-    — and the type checker knows it. The same client class serves all
-    three execution models; only the backend changes.
+    — and the type checker knows it. The same client class serves every
+    execution model; only the backend changes. (The three shipped models
+    are typed precisely; a backend with any other wrapper type works the
+    same way at runtime, its ``send`` result is just typed ``Any`` — see
+    :py:meth:`send`.)
 
     Example (with the test-double backend standing in for a real one)::
 
@@ -99,11 +100,10 @@ class APIClient(Generic[BackendT_co]):
         headers: HeaderTypes | None = None,
     ) -> None:
         """
-        :param backend: the backend performing the HTTP I/O — an
-                        implementation of
-                        :py:class:`~action0.client.backend.SyncBackend`,
-                        :py:class:`~action0.client.backend.AsyncBackend` or
-                        :py:class:`~action0.client.backend.DeferredBackend`
+        :param backend: the backend performing the HTTP I/O — any
+                        implementation of the
+                        :py:class:`~action0.client.backend.Backend`
+                        protocol, whatever its execution model
         :param base_url: the URL the operations' paths are appended to,
                          e.g. ``"https://api.example.com/v2"`` (a given
                          ``Url`` instance is copied)
@@ -146,14 +146,28 @@ class APIClient(Generic[BackendT_co]):
                 request.headers.add(name, self.headers.get_all(name))
         return request
 
+    # The implementation below is execution-model-agnostic; only this
+    # typing facade is not: "the backend's wrapper, around R" cannot be
+    # expressed for an arbitrary wrapper (Python has no higher-kinded
+    # types), so the shipped execution models are spelled out as overloads
+    # — Deferred before Awaitable, because a Deferred *is* awaitable and
+    # the narrower claim must win. Every other wrapper type falls through
+    # to the last overload and is typed Any.
     @overload
-    def send(self: APIClient[SyncBackend], operation: Operation[R]) -> R: ...
+    def send(self: APIClient[Backend[Response]], operation: Operation[R]) -> R: ...
 
     @overload
-    def send(self: APIClient[DeferredBackend], operation: Operation[R]) -> Deferred[R]: ...
+    def send(
+        self: APIClient[Backend[Deferred[Response]]], operation: Operation[R]
+    ) -> Deferred[R]: ...
 
     @overload
-    def send(self: APIClient[AsyncBackend], operation: Operation[R]) -> Awaitable[R]: ...
+    def send(
+        self: APIClient[Backend[Awaitable[Response]]], operation: Operation[R]
+    ) -> Awaitable[R]: ...
+
+    @overload
+    def send(self, operation: Operation[R]) -> Any: ...
 
     def send(self, operation: Operation[Any]) -> Any:
         """
@@ -168,18 +182,16 @@ class APIClient(Generic[BackendT_co]):
         :param operation: the operation to execute
         :return: the parsed result, wrapped according to the backend's
                  execution model: plain for a sync backend, awaitable for
-                 an async backend, a Deferred for a Twisted backend
+                 an async backend, a Deferred for a Twisted backend —
+                 those three are typed precisely; any other execution
+                 model works the same way but is typed ``Any``
         :raises action0.client.errors.ClientError: transport failures and
                 response parsing failures (for async and Twisted backends
                 they arrive at ``await`` time / in the errback instead of
                 being raised here)
         """
         request = self.prepare(operation.as_request(self.base_url))
-        # all three backend protocols share the same send/map call shape;
-        # the checker cannot express "same wrapper in and out" across the
-        # union, so the implementation picks one protocol pro forma — the
-        # overloads above give callers the precise types
-        backend = cast("SyncBackend", self._backend)
+        backend = self._backend
         return backend.map(backend.send(request), operation.parse)
 
     def __repr__(self) -> str:
