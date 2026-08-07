@@ -10,6 +10,12 @@ from action0.client import Backend, SyncBackend, AsyncBackend, DeferredBackend, 
 from action0.client import BackendT_co, SendResultT_co
 from action0.client import BaseSyncBackend, BaseAsyncBackend, BaseDeferredBackend
 from action0.client import Hook, LoggingHook
+from action0.client import (
+    RetryPolicy,
+    RetryingSyncBackend,
+    RetryingAsyncBackend,
+    RetryingDeferredBackend,
+)
 from action0.client import ClientError, TransportError, TimeoutError, APIError
 ```
 
@@ -70,6 +76,13 @@ from action0.client.testing import StubBackend, AsyncStubBackend, DeferredStubBa
 
 ```{eval-rst}
 .. automodule:: action0.client.hooks
+   :members:
+```
+
+## Retries
+
+```{eval-rst}
+.. automodule:: action0.client.retry
    :members:
 ```
 
