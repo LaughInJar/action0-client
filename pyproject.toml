@@ -1,0 +1,176 @@
+[project]
+name = "action0-client"
+dynamic = ["version"]
+authors = [
+    { name="Simon Lachinger" },
+]
+description = "Backend-agnostic, fully typed HTTP API clients — sync, async or Twisted, decided by the backend you plug in"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = [
+    "action0-req",
+    "action0-url",
+]
+keywords = ["http", "client", "api", "typed", "sync", "async", "twisted", "requests", "httpx"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
+    "Topic :: Internet :: WWW/HTTP",
+    "Topic :: Software Development :: Libraries",
+    "Typing :: Typed",
+]
+
+# the HTTP libraries are optional: pick the extras matching the backend(s)
+# you actually use, e.g. `pip install "action0-client[twisted]"`
+[project.optional-dependencies]
+requests = [
+    "requests>=2.32",
+]
+httpx = [
+    "httpx>=0.27",
+]
+twisted = [
+    # the "tls" extra pulls pyOpenSSL + service-identity so https works
+    "twisted[tls]>=24.7",
+]
+all = [
+    "action0-client[requests,httpx,twisted]",
+]
+
+[project.urls]
+Homepage = "https://github.com/LaughInJar/action0-client"
+Documentation = "https://laughinjar.github.io/action0-client/"
+Source = "https://github.com/LaughInJar/action0-client"
+Issues = "https://github.com/LaughInJar/action0-client/issues"
+
+# action0-url and action0-req are not on PyPI yet — resolve them from GitHub
+# for now (uv.lock pins the exact commits; `uv lock --upgrade` moves them
+# forward). Both must be listed here: uv sources are not transitive, so
+# action0-req's own source for action0-url would not apply to this project.
+[tool.uv.sources]
+action0-req = { git = "https://github.com/LaughInJar/action0-req", branch = "main" }
+action0-url = { git = "https://github.com/LaughInJar/action0-url", branch = "main" }
+
+[dependency-groups]
+dev = [
+    # all optional backend libraries are dev dependencies: the tests and the
+    # type checkers need them
+    "httpx>=0.27",
+    "ipython>=8.39.0",
+    "mypy>=2.3.0",
+    "pyright>=1.1.411",
+    "pytest>=9.0.3",
+    "requests>=2.32",
+    "ruff>=0.15.6",
+    "twisted[tls]>=24.7",
+    "ty>=0.0.23",
+    "types-requests>=2.32",
+]
+docs = [
+    "furo>=2025.12.19",
+    "myst-parser>=5.1.0",
+    "sphinx>=9.0.4",
+    "sphinx-autodoc-typehints>=3.6.1",
+    "sphinx-copybutton>=0.5.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/action0/client/__init__.py"
+pattern = "__version__: str = \"(?P<version>[^\"]+)\""
+
+# ship the whole "action0" namespace package so the import name is
+# "action0.client" (hatch strips everything but the last path component)
+[tool.hatch.build.targets.wheel]
+packages = ["src/action0"]
+
+[tool.ruff]
+line-length = 99
+indent-width = 4
+# lint against the oldest supported Python so newer-only syntax is flagged
+target-version = "py311"
+exclude = [
+    ".git",
+    "dist",
+]
+
+[tool.ruff.lint]
+# Enable Pyflakes (`F`) and a subset of the pycodestyle (`E`)  codes by default.
+# Unlike Flake8, Ruff doesn't enable pycodestyle warnings (`W`) or
+# McCabe complexity (`C901`) by default.
+select = ["F", "I", "W", "E4", "E7", "E9"]
+ignore = []
+
+# Allow fix for all enabled rules (when `--fix`) is provided.
+fixable = ["ALL"]
+unfixable = []
+
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.lint.isort]
+force-single-line = true
+combine-as-imports = false
+known-first-party = ["action0"]
+
+[tool.ruff.format]
+# Like Black, use double quotes for strings.
+quote-style = "double"
+
+# Like Black, indent with spaces, rather than tabs.
+indent-style = "space"
+
+# Like Black, respect magic trailing commas.
+skip-magic-trailing-comma = false
+
+# Like Black, automatically detect the appropriate line ending.
+line-ending = "auto"
+
+# Enable auto-formatting of code examples in docstrings. Markdown,
+# reStructuredText code/literal blocks and doctests are all supported.
+#
+# This is currently disabled by default, but it is planned for this
+# to be opt-out in the future.
+docstring-code-format = true
+
+# Set the line length limit used when formatting code snippets in
+# docstrings.
+#
+# This only has an effect when the `docstring-code-format` setting is
+# enabled.
+docstring-code-line-length = 99
+
+[tool.ruff.lint.pydocstyle]
+convention = "pep257"
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "src"]
+# run the >>> examples in the docstrings as tests so they can never go stale
+addopts = "--doctest-modules"
+consider_namespace_packages = true
+
+[tool.mypy]
+# check against the oldest supported Python version
+python_version = "3.11"
+files = ["src", "tests", "examples"]
+strict = true
+# "action0" is a PEP 420 namespace package (no __init__.py in src/action0),
+# so mypy needs the package root spelled out
+mypy_path = "src"
+explicit_package_bases = true
+
+[tool.pyright]
+# check against the oldest supported Python version
+pythonVersion = "3.11"
