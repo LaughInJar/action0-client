@@ -76,6 +76,7 @@ dev = [
     "pytest>=9.0.3",
     "requests>=2.32",
     "ruff>=0.15.6",
+    "trio>=0.26",
     "twisted[tls]>=24.7",
     "ty>=0.0.23",
     "types-requests>=2.32",

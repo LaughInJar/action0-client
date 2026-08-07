@@ -108,6 +108,14 @@ There is also a sync httpx backend
 in exactly like the async httpx one — use whichever library your project
 already depends on.
 
+Async here does not mean asyncio-only: this library's async machinery
+uses nothing but `async`/`await`, and httpx does its I/O through
+[anyio](https://anyio.readthedocs.io/) — so
+{py:class}`~action0.client.backends.httpx.AsyncHttpxBackend` (and the
+async test stub) run under [trio](https://trio.readthedocs.io/)
+unchanged, `trio.run` instead of `asyncio.run`; this is pinned by the
+test suite. `AiohttpBackend` is asyncio-only, as aiohttp itself is.
+
 Runnable stub version (this is what the type checker sees, too — `send()`
 returns a plain {py:class}`~action0.req.response.Response` because the
 backend is synchronous):
