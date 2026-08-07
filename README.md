@@ -134,7 +134,7 @@ models, runnable demo) lives in
 
 Not published to PyPI yet; install straight from GitHub. The HTTP
 libraries are optional extras — pick what you need (`requests`, `httpx`,
-`aiohttp`, `twisted`, `all`); the stdlib `urllib` and thread-pool backends
+`aiohttp`, `urllib3`, `twisted`, `all`); the stdlib `urllib` and thread-pool backends
 work without any extra:
 
 ```shell

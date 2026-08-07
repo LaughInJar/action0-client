@@ -13,7 +13,7 @@ backend(s) you want:
 ```shell
 uv add "action0-client[httpx] @ git+https://github.com/LaughInJar/action0-client"
 
-# extras: requests, httpx, aiohttp, twisted, all
+# extras: requests, httpx, aiohttp, urllib3, twisted, all
 pip install "action0-client[requests,twisted] @ git+https://github.com/LaughInJar/action0-client"
 ```
 
@@ -156,7 +156,10 @@ The counterparts:
 (`aiohttp.ClientSession`, created lazily on the first send when none is
 passed),
 {py:class}`~action0.client.backends.urllib.UrllibBackend` (a stdlib
-`urllib.request` opener — zero dependencies, for simple needs) and
+`urllib.request` opener — zero dependencies, for simple needs),
+{py:class}`~action0.client.backends.urllib3.Urllib3Backend` (a
+`urllib3.PoolManager`, for projects on urllib3 without requests on top;
+also takes a `retries=` policy) and
 {py:class}`~action0.client.backends.twisted.TwistedBackend`
 (`twisted.web.client.Agent`, plus a `reactor=` for the timeout clock).
 All of them accept `timeout=`, `follow_redirects=` and `hooks=`.

@@ -42,12 +42,15 @@ httpx = [
 aiohttp = [
     "aiohttp>=3.9",
 ]
+urllib3 = [
+    "urllib3>=2.0",
+]
 twisted = [
     # the "tls" extra pulls pyOpenSSL + service-identity so https works
     "twisted[tls]>=24.7",
 ]
 all = [
-    "action0-client[requests,httpx,aiohttp,twisted]",
+    "action0-client[requests,httpx,aiohttp,urllib3,twisted]",
 ]
 
 [project.urls]
@@ -79,6 +82,7 @@ dev = [
     "trio>=0.26",
     "twisted[tls]>=24.7",
     "ty>=0.0.23",
+    "urllib3>=2.0",
     "types-requests>=2.32",
 ]
 docs = [
