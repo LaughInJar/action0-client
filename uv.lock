@@ -36,6 +36,7 @@ all = [
     { name = "httpx" },
     { name = "requests" },
     { name = "twisted", extra = ["tls"] },
+    { name = "urllib3" },
 ]
 httpx = [
     { name = "httpx" },
@@ -45,6 +46,9 @@ requests = [
 ]
 twisted = [
     { name = "twisted", extra = ["tls"] },
+]
+urllib3 = [
+    { name = "urllib3" },
 ]
 
 [package.dev-dependencies]
@@ -61,6 +65,7 @@ dev = [
     { name = "twisted", extra = ["tls"] },
     { name = "ty" },
     { name = "types-requests" },
+    { name = "urllib3" },
 ]
 docs = [
     { name = "furo" },
@@ -84,8 +89,10 @@ requires-dist = [
     { name = "requests", marker = "extra == 'requests'", specifier = ">=2.32" },
     { name = "twisted", extras = ["tls"], marker = "extra == 'all'", specifier = ">=24.7" },
     { name = "twisted", extras = ["tls"], marker = "extra == 'twisted'", specifier = ">=24.7" },
+    { name = "urllib3", marker = "extra == 'all'", specifier = ">=2.0" },
+    { name = "urllib3", marker = "extra == 'urllib3'", specifier = ">=2.0" },
 ]
-provides-extras = ["aiohttp", "all", "httpx", "requests", "twisted"]
+provides-extras = ["aiohttp", "all", "httpx", "requests", "twisted", "urllib3"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -101,6 +108,7 @@ dev = [
     { name = "twisted", extras = ["tls"], specifier = ">=24.7" },
     { name = "ty", specifier = ">=0.0.23" },
     { name = "types-requests", specifier = ">=2.32" },
+    { name = "urllib3", specifier = ">=2.0" },
 ]
 docs = [
     { name = "furo", specifier = ">=2025.12.19" },

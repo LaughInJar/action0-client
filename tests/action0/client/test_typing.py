@@ -35,6 +35,7 @@ from action0.client.backends.httpx import HttpxBackend
 from action0.client.backends.requests import RequestsBackend
 from action0.client.backends.twisted import TwistedBackend
 from action0.client.backends.urllib import UrllibBackend
+from action0.client.backends.urllib3 import Urllib3Backend
 from action0.client.testing import AsyncStubBackend
 from action0.client.testing import DeferredStubBackend
 from action0.client.testing import StubBackend
@@ -111,6 +112,7 @@ def check_client_sync(request: Request) -> None:
     assert_type(Client(RequestsBackend()).send(request), Response)
     assert_type(Client(HttpxBackend()).send(request), Response)
     assert_type(Client(UrllibBackend()).send(request), Response)
+    assert_type(Client(Urllib3Backend()).send(request), Response)
     assert_type(Client(StubBackend()).send(request), Response)
     # the client is generic over the wrapper, so the backend is exposed
     # as the protocol, not its concrete class

@@ -10,6 +10,8 @@ matching extra, e.g. ``pip install "action0-client[httpx]"``):
   :py:class:`~action0.client.backends.httpx.AsyncHttpxBackend` (asyncio)
 - :py:mod:`action0.client.backends.aiohttp` —
   :py:class:`~action0.client.backends.aiohttp.AiohttpBackend` (asyncio)
+- :py:mod:`action0.client.backends.urllib3` —
+  :py:class:`~action0.client.backends.urllib3.Urllib3Backend` (sync)
 - :py:mod:`action0.client.backends.twisted` —
   :py:class:`~action0.client.backends.twisted.TwistedBackend` (Deferred)
 
