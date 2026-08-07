@@ -36,6 +36,9 @@ from action0.client.backends.requests import RequestsBackend
 from action0.client.backends.twisted import TwistedBackend
 from action0.client.backends.urllib import UrllibBackend
 from action0.client.backends.urllib3 import Urllib3Backend
+from action0.client.retry import RetryingAsyncBackend
+from action0.client.retry import RetryingDeferredBackend
+from action0.client.retry import RetryingSyncBackend
 from action0.client.testing import AsyncStubBackend
 from action0.client.testing import DeferredStubBackend
 from action0.client.testing import StubBackend
@@ -138,6 +141,19 @@ def check_client_deferred(request: Request) -> None:
 def check_client_future(request: Request) -> None:
     """A thread-pool backend makes Client.send return a Future Response."""
     assert_type(Client(ThreadPoolBackend(StubBackend())).send(request), Future[Response])
+
+
+def check_retrying_wrappers_preserve_types(request: Request) -> None:
+    """The retry wrappers keep their inner backend's execution model."""
+    assert_type(Client(RetryingSyncBackend(StubBackend())).send(request), Response)
+    sync_client = APIClient(RetryingSyncBackend(RequestsBackend()), "https://api.example.com")
+    assert_type(sync_client.send(GetItem(item_id=1)), Item)
+    async_client = APIClient(RetryingAsyncBackend(AsyncStubBackend()), "https://api.example.com")
+    assert_type(async_client.send(GetItem(item_id=1)), Awaitable[Item])
+    deferred_client = APIClient(
+        RetryingDeferredBackend(DeferredStubBackend()), "https://api.example.com"
+    )
+    assert_type(deferred_client.send(GetItem(item_id=1)), Deferred[Item])
 
 
 def check_client_custom_wrapper(request: Request) -> None:
