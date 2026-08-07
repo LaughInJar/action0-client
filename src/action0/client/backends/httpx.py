@@ -1,7 +1,7 @@
 """
 The `httpx <https://www.python-httpx.org/>`_ backends — a
-:py:class:`~action0.client.backend.SyncBackend` and an
-:py:class:`~action0.client.backend.AsyncBackend` sharing one conversion
+:py:data:`~action0.client.backend.SyncBackend` and an
+:py:data:`~action0.client.backend.AsyncBackend` sharing one conversion
 logic, since httpx offers both execution models over one API.
 
 Requires the ``httpx`` extra: ``pip install "action0-client[httpx]"``.

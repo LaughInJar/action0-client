@@ -28,9 +28,11 @@ real I/O needs one of the HTTP libraries.
   [action0-req](https://laughinjar.github.io/action0-req/)) describe
   *what* is on the wire.
 - A **backend** performs the HTTP I/O — through whichever library and
-  execution model you chose. Backends are structural
-  {py:class}`~typing.Protocol`s; the built-in ones live in
-  {py:mod}`action0.client.backends`.
+  execution model you chose. Backends implement one structural protocol,
+  {py:class}`~action0.client.backend.Backend`, generic over what `send()`
+  wraps the response in (`Backend[Response]` is a sync backend,
+  `Backend[Awaitable[Response]]` an asyncio one, ...); the built-in ones
+  live in {py:mod}`action0.client.backends`.
 - {py:class}`~action0.client.client.Client` sends raw requests through a
   backend ("ring 0").
 - {py:class}`~action0.client.operation.Operation` +
@@ -445,8 +447,9 @@ paths test without a reactor.
 
 ## Writing your own backend
 
-A backend is anything implementing one of the three protocols — two
-methods, no registration:
+A backend is anything implementing the
+{py:class}`~action0.client.backend.Backend` protocol — two methods, no
+registration:
 
 - `send(request)` — do the I/O, return the (wrapped)
   {py:class}`~action0.req.response.Response`.
@@ -493,3 +496,42 @@ fully typed, hooks included. The async and Deferred base classes
 ({py:class}`~action0.client.backend.BaseAsyncBackend`,
 {py:class}`~action0.client.backend.BaseDeferredBackend`) mirror this with
 an `async def _send` / a Deferred-returning `_send`.
+
+### Other execution models
+
+The protocol is generic over the wrapper type, so backends are not limited
+to the three shipped execution models. Say your application runs sends on
+a thread pool and wants `concurrent.futures.Future` results:
+
+```python
+from concurrent.futures import Future, ThreadPoolExecutor
+from typing import Callable, TypeVar
+from action0.client import Client
+from action0.req import Request, Response
+
+T = TypeVar("T")
+S = TypeVar("S")
+
+
+class FutureBackend:
+    """Runs a sync backend's sends on a thread pool."""
+
+    def __init__(self, inner: Client[Response], pool: ThreadPoolExecutor) -> None:
+        self._inner = inner
+        self._pool = pool
+
+    def send(self, request: Request) -> Future[Response]:
+        return self._pool.submit(self._inner.send, request)
+
+    def map(self, result: Future[T], fn: Callable[[T], S]) -> Future[S]:
+        return self._pool.submit(lambda: fn(result.result()))
+```
+
+`Client(FutureBackend(...)).send(request)` is a `Future[Response]` — the
+return type is derived from the backend, no client code involved. For
+{py:meth}`APIClient.send <action0.client.api.APIClient.send>` the parsed
+results of such a backend are typed `Any` (rewriting "the wrapper, around
+the operation's result type" for an *arbitrary* wrapper would need
+higher-kinded types, which Python doesn't have — only the three shipped
+wrappers are spelled out as overloads); everything works normally at
+runtime.

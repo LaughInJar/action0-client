@@ -1,6 +1,6 @@
 """
 The `Twisted <https://twisted.org/>`_ backend — a
-:py:class:`~action0.client.backend.DeferredBackend` driving a
+:py:data:`~action0.client.backend.DeferredBackend` driving a
 :py:class:`twisted.web.client.Agent`.
 
 Requires the ``twisted`` extra: ``pip install "action0-client[twisted]"``

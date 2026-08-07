@@ -87,7 +87,7 @@ class _Script:
 
 class StubBackend(BaseSyncBackend):
     """
-    A :py:class:`~action0.client.backend.SyncBackend` test double: answers
+    A :py:data:`~action0.client.backend.SyncBackend` test double: answers
     with canned responses and records the requests.
 
     Example — scripted responses are handed out in order, the last one
@@ -146,7 +146,7 @@ class StubBackend(BaseSyncBackend):
 
 class AsyncStubBackend(BaseAsyncBackend):
     """
-    An :py:class:`~action0.client.backend.AsyncBackend` test double:
+    An :py:data:`~action0.client.backend.AsyncBackend` test double:
     behaves exactly like :py:class:`StubBackend`, but ``send`` returns a
     coroutine like a real async backend.
 
@@ -195,7 +195,7 @@ class AsyncStubBackend(BaseAsyncBackend):
 
 class DeferredStubBackend(BaseDeferredBackend):
     """
-    A :py:class:`~action0.client.backend.DeferredBackend` test double:
+    A :py:data:`~action0.client.backend.DeferredBackend` test double:
     behaves exactly like :py:class:`StubBackend`, but ``send`` returns an
     already-fired :py:class:`~twisted.internet.defer.Deferred` like a real
     Twisted backend. The class is importable without twisted installed;

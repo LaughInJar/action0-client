@@ -18,7 +18,7 @@ Requires Python 3.11 or newer.
 Full documentation including the API reference:
 <https://laughinjar.github.io/action0-client/>
 
-**Status:** the core API is complete — the backend protocols with
+**Status:** the core API is complete — the backend protocol with
 requests/httpx/Twisted implementations and instrumentation hooks, the raw
 `Client`, the typed `Operation`/`JsonOperation`/`APIClient` layer, and the
 stub backends for testing.
@@ -27,8 +27,9 @@ stub backends for testing.
 
 ### Raw requests, any execution model
 
-A backend implements one of three structural protocols (`SyncBackend`,
-`AsyncBackend`, `DeferredBackend`); `Client` sends
+A backend implements one structural protocol, `Backend[W]`, generic over
+what its `send` wraps the response in (`W` is `Response`,
+`Awaitable[Response]`, `Deferred[Response]`, ...); `Client` sends
 [action0-req](https://github.com/LaughInJar/action0-req) `Request`s
 through it, and the return type of `send()` follows the backend:
 
