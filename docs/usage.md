@@ -183,6 +183,19 @@ with RequestsBackend() as inner, ThreadPoolBackend(inner) as backend:
 Hooks belong on the *wrapped* backend (they run on the pool threads,
 around the actual I/O); the wrapper itself stays out of the way.
 
+### Greenlet stacks (gevent, eventlet)
+
+Nothing extra is needed for [gevent](https://www.gevent.org/) or
+eventlet: monkey-patching turns the blocking sockets under
+{py:class}`~action0.client.backends.requests.RequestsBackend` and
+{py:class}`~action0.client.backends.urllib.UrllibBackend` cooperative,
+exactly as it does for plain `requests`/`urllib` code. From this
+library's point of view those stacks are simply synchronous — `send()`
+returns the plain `Response`, typed by the sync overloads; the yielding
+to other greenlets happens inside the socket layer. (Don't combine
+monkey-patching with the asyncio, trio or Twisted backends in the same
+process — that caveat comes from the greenlet libraries, not from here.)
+
 ## Instrumentation hooks
 
 Backends built on the base classes run
