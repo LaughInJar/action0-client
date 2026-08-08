@@ -8,6 +8,22 @@ request/response representation) and
 [action0-url](https://laughinjar.github.io/action0-url/) (the URL
 representation).
 
+The same typed operation, driven by three different backends:
+
+```python
+client = APIClient(RequestsBackend(), "https://api.example.com/v1")
+item = client.send(GetItem(item_id=42))  # Item
+
+client = APIClient(AsyncHttpxBackend(), "https://api.example.com/v1")
+item = await client.send(GetItem(item_id=42))  # Awaitable[Item]
+
+client = APIClient(TwistedBackend(), "https://api.example.com/v1")
+deferred = client.send(GetItem(item_id=42))  # Deferred[Item]
+```
+
+(`GetItem` is an ordinary typed operation class, written once — the
+{doc}`guide <usage/operations>` shows its definition.)
+
 ```shell
 uv add "action0-client[httpx]"    # not on PyPI yet — install from GitHub for now
 ```
