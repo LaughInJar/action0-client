@@ -11,6 +11,7 @@ installation
 concepts
 client
 backends
+streaming
 hooks
 errors
 retries
