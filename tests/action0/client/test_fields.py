@@ -7,6 +7,7 @@ from action0.client.fields import _METADATA_KEY
 from action0.client.fields import FieldSpec
 from action0.client.fields import Location
 from action0.client.fields import body
+from action0.client.fields import form_field
 from action0.client.fields import header
 from action0.client.fields import json_body
 from action0.client.fields import json_field
@@ -42,6 +43,7 @@ class SpecifierTestCase(unittest.TestCase):
             (path_param(), Location.PATH),
             (json_field(), Location.JSON_FIELD),
             (json_body(), Location.JSON_BODY),
+            (form_field(), Location.FORM_FIELD),
             (body(), Location.BODY),
         ]
         for field, location in cases:
@@ -55,6 +57,7 @@ class SpecifierTestCase(unittest.TestCase):
         self.assertEqual(spec_of(query("pageSize")).alias, "pageSize")
         self.assertEqual(spec_of(header("X-API-Key")).alias, "X-API-Key")
         self.assertEqual(spec_of(json_field("itemId")).alias, "itemId")
+        self.assertEqual(spec_of(form_field("grant_type")).alias, "grant_type")
         self.assertIsNone(spec_of(query()).alias)
 
     def test_serialize_callable(self) -> None:

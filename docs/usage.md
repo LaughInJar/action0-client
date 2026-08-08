@@ -432,7 +432,16 @@ deferred.addCallback(...)
 ### Field placement
 
 ```python
-from action0.client import JsonOperation, body, header, json_body, json_field, path_param, query
+from action0.client import (
+    JsonOperation,
+    body,
+    form_field,
+    header,
+    json_body,
+    json_field,
+    path_param,
+    query,
+)
 from action0.req import Method
 from typing import Any
 
@@ -454,10 +463,30 @@ class CreateItem(JsonOperation[Any]):
   `Content-Type: application/json` added if unset).
 - `json_body()` sends one field — scalar, mapping, sequence, dataclass —
   as the entire JSON body instead.
+- All `form_field()`s together form an
+  `application/x-www-form-urlencoded` body — the classic HTML form POST
+  and the shape of OAuth token endpoints. Values serialize exactly like
+  query parameters:
+
+  ```python
+  class RequestToken(JsonOperation[Any]):
+      method = Method.POST
+      path = "/oauth/token"
+
+      grant_type: str = form_field(default="client_credentials")
+      client_id: str = form_field()
+      client_secret: str = form_field(repr=False)
+
+
+  # body: grant_type=client_credentials&client_id=...&client_secret=...
+  # Content-Type: application/x-www-form-urlencoded
+  ```
+
 - `body()` sends one field as the raw body: `bytes`, `str` or a streaming
   {py:class}`~action0.req.body.BodyProducer`.
-- Only one of these three forms per operation, checked at class-creation
-  time.
+- Only one of these body forms per operation (several `json_field()`s
+  *or* several `form_field()`s *or* a single `json_body()` / `body()`),
+  checked at class-creation time.
 
 Serialization is uniform and overridable: `None` means "not sent" (except
 for path parameters, which must not be `None`), enums send their

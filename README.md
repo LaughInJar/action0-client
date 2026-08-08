@@ -61,7 +61,8 @@ deferred.addCallback(lambda response: print(response.status))  # Deferred[Respon
 
 Endpoints are dataclasses: HTTP method and path template are fixed on the
 class, the variable parts are typed fields placed via specifiers
-(`query`, `header`, `path_param`, `json_field`, `json_body`, `body`), and
+(`query`, `header`, `path_param`, `json_field`, `json_body`, `form_field`,
+`body`), and
 the generic parameter is the parsed result type:
 
 ```python
