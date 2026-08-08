@@ -29,6 +29,7 @@ from .backend import DeferredBackend
 from .backend import FuturesBackend
 from .backend import SendResultT_co
 from .backend import SyncBackend
+from .caching import AsyncCacheStore
 from .caching import CachePolicy
 from .caching import CacheStore
 from .caching import CachingAsyncBackend
@@ -43,6 +44,7 @@ from .errors import TransportError
 from .fields import FieldSpec
 from .fields import Location
 from .fields import body
+from .fields import form_field
 from .fields import header
 from .fields import json_body
 from .fields import json_field
@@ -63,6 +65,7 @@ __all__ = [
     "APIClient",
     "APIError",
     "AsyncBackend",
+    "AsyncCacheStore",
     "Backend",
     "BackendT_co",
     "BaseAsyncBackend",
@@ -93,6 +96,7 @@ __all__ = [
     "TimeoutError",
     "TransportError",
     "body",
+    "form_field",
     "header",
     "json_body",
     "json_field",

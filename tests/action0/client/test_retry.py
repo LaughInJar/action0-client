@@ -1,3 +1,5 @@
+import datetime
+import email.utils
 import unittest
 from typing import Any
 
@@ -52,12 +54,74 @@ class RetryPolicyTestCase(unittest.TestCase):
 
     def test_delay_grows_exponentially_and_is_capped(self) -> None:
         """
-        Test the backoff progression.
+        Test the backoff progression (with the jitter disabled, so it is
+        exact).
         """
-        policy = RetryPolicy(backoff=1.0, multiplier=2.0, max_backoff=5.0)
+        policy = RetryPolicy(backoff=1.0, multiplier=2.0, max_backoff=5.0, jitter=False)
         self.assertEqual(
             [policy.delay_for(attempt) for attempt in (1, 2, 3, 4)], [1.0, 2.0, 4.0, 5.0]
         )
+
+    def test_full_jitter_scales_the_delay(self) -> None:
+        """
+        Test that the default full jitter multiplies the exponential
+        delay by the rng draw.
+        """
+        policy = RetryPolicy(backoff=1.0, multiplier=2.0, max_backoff=5.0, rng=lambda: 0.5)
+        self.assertEqual(
+            [policy.delay_for(attempt) for attempt in (1, 2, 3, 4)], [0.5, 1.0, 2.0, 2.5]
+        )
+
+    def test_jitter_stays_below_the_full_delay(self) -> None:
+        """
+        Test the default rng path: every jittered delay lands in
+        [0, exponential delay).
+        """
+        policy = RetryPolicy(backoff=1.0, multiplier=2.0, max_backoff=5.0)
+        for _ in range(20):
+            self.assertGreaterEqual(policy.delay_for(2), 0.0)
+            self.assertLess(policy.delay_for(2), 2.0)
+
+    def test_retry_after_seconds_wins_over_the_backoff(self) -> None:
+        """
+        Test that a Retry-After header (seconds form) overrides the
+        computed delay, jitter included, but stays capped.
+        """
+        policy = RetryPolicy(backoff=1.0, max_backoff=30.0)
+        hinted = Response(429, headers={"Retry-After": "7"})
+        self.assertEqual(policy.delay_for(1, hinted), 7.0)
+
+        greedy = Response(429, headers={"Retry-After": "3600"})
+        self.assertEqual(policy.delay_for(1, greedy), 30.0)
+
+    def test_retry_after_http_date_form(self) -> None:
+        """
+        Test the HTTP-date form: a future date is capped at max_backoff,
+        a past date means "retry right away".
+        """
+        policy = RetryPolicy(max_backoff=30.0)
+        future = email.utils.format_datetime(
+            datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1),
+            usegmt=True,
+        )
+        self.assertEqual(policy.delay_for(1, Response(503, headers={"Retry-After": future})), 30.0)
+
+        past = "Mon, 01 Jan 2001 00:00:00 GMT"
+        self.assertEqual(policy.delay_for(1, Response(503, headers={"Retry-After": past})), 0.0)
+
+    def test_retry_after_fallbacks(self) -> None:
+        """
+        Test that an unparseable header, a missing response and
+        respect_retry_after=False all fall back to the plain backoff.
+        """
+        policy = RetryPolicy(backoff=1.0, jitter=False)
+        garbled = Response(503, headers={"Retry-After": "soon"})
+        self.assertEqual(policy.delay_for(1, garbled), 1.0)
+        self.assertEqual(policy.delay_for(1, None), 1.0)
+
+        deaf = RetryPolicy(backoff=1.0, jitter=False, respect_retry_after=False)
+        hinted = Response(429, headers={"Retry-After": "7"})
+        self.assertEqual(deaf.delay_for(1, hinted), 1.0)
 
     def test_method_gate(self) -> None:
         """
@@ -119,7 +183,7 @@ class RetryingSyncBackendTestCase(unittest.TestCase):
         Test the response-retry path, including the recorded waits.
         """
         inner = StubBackend(Response(503), Response(429), Response(200, body="ok"))
-        backend, slept = self.backend(inner, RetryPolicy(attempts=3, backoff=1.0))
+        backend, slept = self.backend(inner, RetryPolicy(attempts=3, backoff=1.0, jitter=False))
 
         response = backend.send(Request("https://example.com/"))
 
@@ -179,6 +243,19 @@ class RetryingSyncBackendTestCase(unittest.TestCase):
             backend.send(Request("https://example.com/"))
         self.assertEqual(len(bug.requests), 1)
 
+    def test_retry_after_is_honored_end_to_end(self) -> None:
+        """
+        Test that the wait between attempts follows the server's
+        Retry-After header instead of the backoff.
+        """
+        inner = StubBackend(Response(429, headers={"Retry-After": "5"}), Response(200, body="ok"))
+        backend, slept = self.backend(inner, RetryPolicy(attempts=2, backoff=1.0, jitter=False))
+
+        response = backend.send(Request("https://example.com/"))
+
+        self.assertEqual(response.body_str(), "ok")
+        self.assertEqual(slept, [5.0])
+
     def test_post_is_not_retried_by_default(self) -> None:
         """
         Test the idempotency gate end to end.
@@ -224,7 +301,7 @@ class RetryingAsyncBackendTestCase(unittest.IsolatedAsyncioTestCase):
 
         inner = AsyncStubBackend(Response(503), Response(200, body="ok"))
         backend = RetryingAsyncBackend(
-            inner, RetryPolicy(attempts=2, backoff=0.25), sleep=fake_sleep
+            inner, RetryPolicy(attempts=2, backoff=0.25, jitter=False), sleep=fake_sleep
         )
 
         response = await backend.send(Request("https://example.com/"))
@@ -269,7 +346,7 @@ class RetryingDeferredBackendTestCase(unittest.TestCase):
         clock = Clock()
         inner = DeferredStubBackend(Response(503), Response(200, body="ok"))
         backend = RetryingDeferredBackend(
-            inner, RetryPolicy(attempts=2, backoff=1.0), reactor=clock
+            inner, RetryPolicy(attempts=2, backoff=1.0, jitter=False), reactor=clock
         )
 
         deferred = backend.send(Request("https://example.com/"))
@@ -288,6 +365,28 @@ class RetryingDeferredBackendTestCase(unittest.TestCase):
         clock.advance(1.0)
         self.assertEqual(len(inner.requests), 2)
         self.assertEqual(seen[0].body_str(), "ok")
+
+    def test_retry_after_stretches_the_wait(self) -> None:
+        """
+        Test that the Twisted wrapper waits out a Retry-After header that
+        is longer than the backoff.
+        """
+        clock = Clock()
+        inner = DeferredStubBackend(
+            Response(429, headers={"Retry-After": "2"}), Response(200, body="ok")
+        )
+        backend = RetryingDeferredBackend(
+            inner, RetryPolicy(attempts=2, backoff=1.0, jitter=False), reactor=clock
+        )
+
+        backend.send(Request("https://example.com/"))
+
+        # after the plain backoff (1s) nothing may happen yet — the server
+        # asked for 2s
+        clock.advance(1.0)
+        self.assertEqual(len(inner.requests), 1)
+        clock.advance(1.0)
+        self.assertEqual(len(inner.requests), 2)
 
     def test_exhausted_attempts_fail_with_the_last_error(self) -> None:
         """
@@ -312,7 +411,7 @@ class RetryingDeferredBackendTestCase(unittest.TestCase):
         clock = Clock()
         inner = DeferredStubBackend(Response(503), Response(200, body='{"pong": true}'))
         backend = RetryingDeferredBackend(
-            inner, RetryPolicy(attempts=2, backoff=0.5), reactor=clock
+            inner, RetryPolicy(attempts=2, backoff=0.5, jitter=False), reactor=clock
         )
         client = APIClient(backend, "https://api.example.com")
 

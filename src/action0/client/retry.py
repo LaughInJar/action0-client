@@ -14,8 +14,17 @@ default, transport errors and typical transient statuses (408, 429, 5xx
 gateway family), for idempotent methods only. When the attempts are
 exhausted, the last response is returned (or the last error raised)
 as-is — the policy never invents failures.
+
+The waits apply "full jitter" by default — each one is a uniformly
+random fraction of the exponential delay, so a burst of failing clients
+does not retry in lockstep — and honor a ``Retry-After`` response header
+(both the seconds and the HTTP-date form), capped at the policy's
+:py:attr:`~RetryPolicy.max_backoff`.
 """
 
+import datetime
+import email.utils
+import random
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -25,6 +34,7 @@ from typing import Callable
 from typing import TypeVar
 from typing import cast
 
+from action0.req import Header
 from action0.req import Request
 from action0.req import Response
 
@@ -42,6 +52,36 @@ S = TypeVar("S")
 IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE", "PUT", "DELETE"})
 """The HTTP methods that are safe to repeat per :rfc:`9110` — the default
 method gate of :py:class:`RetryPolicy`."""
+
+
+def _retry_after_seconds(response: Response) -> "float | None":
+    """
+    The wait a ``Retry-After`` response header asks for, in seconds.
+
+    Both :rfc:`9110` forms are understood: a non-negative number of
+    seconds, and an HTTP-date (which is turned into a delay against the
+    current time). A date in the past yields ``0.0``.
+
+    :param response: the response that may carry the header
+    :return: the requested wait, or ``None`` if the header is missing or
+             unparseable
+    """
+    value = response.headers.get(Header.RETRY_AFTER)
+    if value is None:
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            when = email.utils.parsedate_to_datetime(value)
+        except ValueError:
+            return None
+        if when.tzinfo is None:
+            # parsedate_to_datetime returns a naive datetime for "-0000"
+            when = when.replace(tzinfo=datetime.timezone.utc)
+        now = datetime.datetime.now(datetime.timezone.utc)
+        seconds = (when - now).total_seconds()
+    return max(0.0, seconds)
 
 
 @dataclass(frozen=True)
@@ -81,14 +121,43 @@ class RetryPolicy:
     method (only do that for APIs whose non-idempotent endpoints tolerate
     replays)."""
 
-    def delay_for(self, attempt: int) -> float:
+    jitter: bool = True
+    """Whether to apply "full jitter": each wait becomes a uniformly
+    random duration between zero and the exponential delay, so many
+    clients failing together do not retry in lockstep. ``False`` waits
+    the exact exponential delays."""
+
+    respect_retry_after: bool = True
+    """Whether a ``Retry-After`` response header overrides the computed
+    backoff (jitter included) — the server knows best when it is worth
+    coming back. Its value is still capped at :py:attr:`max_backoff`."""
+
+    rng: Callable[[], float] = random.random
+    """The random source for the jitter, returning floats in ``[0, 1)``
+    (injectable for deterministic tests)."""
+
+    def delay_for(self, attempt: int, response: "Response | None" = None) -> float:
         """
         The seconds to wait after the given (1-based) attempt failed.
 
+        A parseable ``Retry-After`` header on the response wins over the
+        computed backoff (if :py:attr:`respect_retry_after`); otherwise
+        the delay is exponential, jittered per :py:attr:`jitter`. Both
+        are capped at :py:attr:`max_backoff`.
+
         :param attempt: the attempt that just failed
-        :return: the backoff delay, exponential and capped
+        :param response: the response that triggered the retry, if the
+                         attempt produced one
+        :return: the wait in seconds
         """
-        return min(self.max_backoff, self.backoff * self.multiplier ** (attempt - 1))
+        if response is not None and self.respect_retry_after:
+            hinted = _retry_after_seconds(response)
+            if hinted is not None:
+                return min(self.max_backoff, hinted)
+        delay = min(self.max_backoff, self.backoff * self.multiplier ** (attempt - 1))
+        if self.jitter:
+            delay *= self.rng()
+        return delay
 
     def applies_to(self, request: Request) -> bool:
         """
@@ -185,6 +254,7 @@ class RetryingSyncBackend:
         """
         attempt = 1
         while True:
+            rejected: "Response | None" = None
             try:
                 response = self._inner.send(request)
             except Exception as error:
@@ -193,7 +263,8 @@ class RetryingSyncBackend:
             else:
                 if not self._policy.should_retry_response(request, response, attempt):
                     return response
-            self._sleep(self._policy.delay_for(attempt))
+                rejected = response
+            self._sleep(self._policy.delay_for(attempt, rejected))
             attempt += 1
 
     def map(self, result: T, fn: Callable[[T], S]) -> S:
@@ -265,6 +336,7 @@ class RetryingAsyncBackend:
 
         attempt = 1
         while True:
+            rejected: "Response | None" = None
             try:
                 response = await self._inner.send(request)
             except Exception as error:
@@ -273,7 +345,8 @@ class RetryingAsyncBackend:
             else:
                 if not self._policy.should_retry_response(request, response, attempt):
                     return response
-            await sleep(self._policy.delay_for(attempt))
+                rejected = response
+            await sleep(self._policy.delay_for(attempt, rejected))
             attempt += 1
 
     def map(self, result: Awaitable[T], fn: Callable[[T], S]) -> Awaitable[S]:
@@ -352,16 +425,16 @@ class RetryingDeferredBackend:
             def on_response(response: Response) -> "Response | Deferred[Response]":
                 if not self._policy.should_retry_response(request, response, attempt):
                     return response
-                return wait_and_repeat()
+                return wait_and_repeat(response)
 
             def on_failure(failure: "Failure") -> "Failure | Deferred[Response]":
                 error = failure.value
                 if error is None or not self._policy.should_retry_error(request, error, attempt):
                     return failure
-                return wait_and_repeat()
+                return wait_and_repeat(None)
 
-            def wait_and_repeat() -> "Deferred[Response]":
-                delay = self._policy.delay_for(attempt)
+            def wait_and_repeat(rejected: "Response | None") -> "Deferred[Response]":
+                delay = self._policy.delay_for(attempt, rejected)
                 waited: "Deferred[None]" = deferLater(clock, delay)
                 return waited.addCallback(lambda _: attempt_once(attempt + 1))
 

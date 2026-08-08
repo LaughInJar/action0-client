@@ -6,6 +6,7 @@ from action0.client import CachePolicy
 from action0.client import JsonOperation
 from action0.client import MemoryCache
 from action0.client import query
+from action0.client.caching import AsyncCacheStore
 from action0.client.caching import CachingAsyncBackend
 from action0.client.caching import CachingDeferredBackend
 from action0.client.caching import CachingSyncBackend
@@ -33,6 +34,25 @@ class FakeClock:
 
     def __call__(self) -> float:
         return self.now
+
+
+class AsyncMemoryStore:
+    """
+    An :py:class:`~action0.client.caching.AsyncCacheStore` double: a
+    MemoryCache behind awaitable methods, recording every call.
+    """
+
+    def __init__(self) -> None:
+        self.inner = MemoryCache()
+        self.calls: list[str] = []
+
+    async def get(self, key: str) -> "Response | None":
+        self.calls.append("get")
+        return self.inner.get(key)
+
+    async def set(self, key: str, response: Response, ttl: float) -> None:
+        self.calls.append("set")
+        self.inner.set(key, response, ttl)
 
 
 class MemoryCacheTestCase(unittest.TestCase):
@@ -260,6 +280,34 @@ class CachingAsyncBackendTestCase(unittest.IsolatedAsyncioTestCase):
         await backend.send(post)
         await backend.send(post)
         self.assertEqual(len(inner.requests), 2)
+
+    async def test_async_store_is_awaited(self) -> None:
+        """
+        Test the AsyncCacheStore flavor: lookups and stores are awaited,
+        and the hit path still skips the network.
+        """
+        store: AsyncCacheStore = AsyncMemoryStore()  # pins protocol conformance
+        inner = AsyncStubBackend(Response(200, body="fetched"))
+        backend = CachingAsyncBackend(inner, store=store)
+        request = Request("https://api.example.com/rates")
+
+        first = await backend.send(request)
+        second = await backend.send(request)
+
+        self.assertEqual([first.body_str(), second.body_str()], ["fetched", "fetched"])
+        self.assertEqual(len(inner.requests), 1)
+        assert isinstance(store, AsyncMemoryStore)
+        self.assertEqual(store.calls, ["get", "set", "get"])
+
+    async def test_async_store_sees_no_uncacheable_traffic(self) -> None:
+        """
+        Test that the bypass path never touches an async store.
+        """
+        store = AsyncMemoryStore()
+        inner = AsyncStubBackend(Response(200))
+        backend = CachingAsyncBackend(inner, store=store)
+        await backend.send(Request("https://api.example.com/rates", "POST"))
+        self.assertEqual(store.calls, [])
 
 
 class CachingDeferredBackendTestCase(unittest.TestCase):

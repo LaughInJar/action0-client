@@ -364,6 +364,14 @@ for idempotent methods only (`methods=None` lifts that gate). When the
 attempt budget is exhausted, the last response is returned (or the last
 error raised) unchanged — the policy never invents failures.
 
+How long is waited is also the policy's call: exponential backoff with
+"full jitter" — each wait is a uniformly random duration up to the
+exponential delay, so a fleet of clients hitting the same outage does
+not retry in lockstep (`jitter=False` waits the exact delays). A
+`Retry-After` response header (seconds or HTTP-date form) overrides the
+computed wait — the server knows best — capped at the policy's
+`max_backoff`; `respect_retry_after=False` ignores it.
+
 Two execution-model notes: the async wrapper waits with `asyncio.sleep`
 by default — under trio pass `sleep=trio.sleep`; the Twisted wrapper
 takes a `reactor=` for its backoff timer (the global reactor by
@@ -398,6 +406,41 @@ bodies are never stored. Entries live in a
 {py:class}`~action0.client.caching.MemoryCache` is a thread-safe
 in-process LRU; implement the two-method protocol to plug in memcached,
 redis and friends.
+
+On {py:class}`~action0.client.caching.CachingAsyncBackend` the store
+may also be an {py:class}`~action0.client.caching.AsyncCacheStore` —
+the same two methods, awaitable — so a store doing network I/O of its
+own does not block the event loop. A redis-backed store is a page of
+code:
+
+```python
+import pickle
+from redis.asyncio import Redis
+from action0.req import Response
+
+
+class RedisCache:
+    """An AsyncCacheStore over redis.asyncio."""
+
+    def __init__(self, redis: Redis, prefix: str = "action0:") -> None:
+        self._redis = redis
+        self._prefix = prefix
+
+    async def get(self, key: str) -> Response | None:
+        data = await self._redis.get(self._prefix + key)
+        return pickle.loads(data) if data is not None else None
+
+    async def set(self, key: str, response: Response, ttl: float) -> None:
+        # redis expiries are integer seconds; round up so entries never
+        # outlive the policy's ttl by rounding *down* to 0
+        await self._redis.set(self._prefix + key, pickle.dumps(response), ex=max(1, int(ttl)))
+
+
+backend = CachingAsyncBackend(inner, store=RedisCache(Redis()))
+```
+
+(Only pickle data you trust — here it is your own cache. The sync and
+Twisted wrappers take plain `CacheStore`s only.)
 
 This is deliberately **not** an RFC 9111 HTTP cache — no `Cache-Control`
 parsing, no revalidation. It is the "a result up to a minute old is
@@ -480,7 +523,16 @@ deferred.addCallback(...)
 ### Field placement
 
 ```python
-from action0.client import JsonOperation, body, header, json_body, json_field, path_param, query
+from action0.client import (
+    JsonOperation,
+    body,
+    form_field,
+    header,
+    json_body,
+    json_field,
+    path_param,
+    query,
+)
 from action0.req import Method
 from typing import Any
 
@@ -502,10 +554,30 @@ class CreateItem(JsonOperation[Any]):
   `Content-Type: application/json` added if unset).
 - `json_body()` sends one field — scalar, mapping, sequence, dataclass —
   as the entire JSON body instead.
+- All `form_field()`s together form an
+  `application/x-www-form-urlencoded` body — the classic HTML form POST
+  and the shape of OAuth token endpoints. Values serialize exactly like
+  query parameters:
+
+  ```python
+  class RequestToken(JsonOperation[Any]):
+      method = Method.POST
+      path = "/oauth/token"
+
+      grant_type: str = form_field(default="client_credentials")
+      client_id: str = form_field()
+      client_secret: str = form_field(repr=False)
+
+
+  # body: grant_type=client_credentials&client_id=...&client_secret=...
+  # Content-Type: application/x-www-form-urlencoded
+  ```
+
 - `body()` sends one field as the raw body: `bytes`, `str` or a streaming
   {py:class}`~action0.req.body.BodyProducer`.
-- Only one of these three forms per operation, checked at class-creation
-  time.
+- Only one of these body forms per operation (several `json_field()`s
+  *or* several `form_field()`s *or* a single `json_body()` / `body()`),
+  checked at class-creation time.
 
 Serialization is uniform and overridable: `None` means "not sent" (except
 for path parameters, which must not be `None`), enums send their
