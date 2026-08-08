@@ -29,6 +29,7 @@ from .backend import DeferredBackend
 from .backend import FuturesBackend
 from .backend import SendResultT_co
 from .backend import SyncBackend
+from .caching import AsyncCacheStore
 from .caching import CachePolicy
 from .caching import CacheStore
 from .caching import CachingAsyncBackend
@@ -64,6 +65,7 @@ __all__ = [
     "APIClient",
     "APIError",
     "AsyncBackend",
+    "AsyncCacheStore",
     "Backend",
     "BackendT_co",
     "BaseAsyncBackend",
