@@ -17,6 +17,7 @@ from action0.client import TransportError
 from action0.client import query
 from action0.client.backends.aiohttp import AiohttpBackend
 from action0.req import Request
+from action0.req.body import BodyProducer
 
 
 class EchoHandler(BaseHTTPRequestHandler):
@@ -139,6 +140,21 @@ class AiohttpBackendTestCase(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(seen["body"], '{"a": 1}')
         self.assertEqual(seen["headers"]["X-Tag"], "yes")
         self.assertEqual(seen["headers"]["Content-Type"], "application/json")
+
+    async def test_streamed_response_body(self) -> None:
+        """
+        Test stream=True: the body arrives as an async producer over the
+        open connection and streams the same content a preloading send
+        would.
+        """
+        async with AiohttpBackend(stream=True) as backend:
+            response = await backend.send(Request(f"{self.base_url}/items"))
+            self.assertIsInstance(response.body, BodyProducer)
+
+            producer = response.body_producer()
+            assert producer is not None
+            chunks = [chunk async for chunk in producer.achunks()]
+            self.assertEqual(json.loads(b"".join(chunks))["path"], "/items")
 
     async def test_error_status_is_not_an_exception(self) -> None:
         """

@@ -14,6 +14,8 @@ import urllib3
 
 from action0.req import Request
 from action0.req import Response
+from action0.req.body import BodyTypes
+from action0.req.body import IterableBody
 
 from ..backend import BaseSyncBackend
 from ..errors import TimeoutError
@@ -22,6 +24,9 @@ from ..hooks import Hook
 
 DEFAULT_TIMEOUT = 30.0
 """The default total number of seconds to wait for connect + read."""
+
+_CHUNK_SIZE = 65536
+"""The chunk size for streamed response bodies."""
 
 # urllib3 reports the HTTP version of the response as an int
 _HTTP_VERSIONS = {9: "HTTP/0.9", 10: "HTTP/1.0", 11: "HTTP/1.1", 20: "HTTP/2"}
@@ -48,6 +53,11 @@ class Urllib3Backend(BaseSyncBackend):
     - Streaming request bodies work: a
       :py:class:`~action0.req.body.BodyProducer` body is handed to urllib3
       as a chunk iterator.
+    - Streaming *response* bodies are opt-in: with ``stream=True`` the
+      response body is an :py:class:`~action0.req.body.IterableBody`
+      producing the bytes as they arrive instead of preloaded bytes; the
+      connection is held until the body is consumed (or the producer is
+      garbage-collected).
     - Multiple response header lines with the same name are preserved
       (urllib3's header dict keeps them apart).
     - Multiple *request* header lines are merged into one comma-separated
@@ -61,6 +71,7 @@ class Urllib3Backend(BaseSyncBackend):
         timeout: "float | None" = DEFAULT_TIMEOUT,
         follow_redirects: bool = True,
         retries: "urllib3.Retry | bool | int | None" = None,
+        stream: bool = False,
         hooks: Iterable[Hook] = (),
     ) -> None:
         """
@@ -75,6 +86,9 @@ class Urllib3Backend(BaseSyncBackend):
                         (a :py:class:`urllib3.util.Retry`, a count, or
                         ``False`` to raise transport errors immediately);
                         ``None`` uses urllib3's default
+        :param stream: whether response bodies arrive as streaming
+                       producers instead of preloaded bytes (``send``
+                       then returns at headers arrival)
         :param hooks: the instrumentation hooks to run around every send
         """
         super().__init__(hooks)
@@ -83,6 +97,7 @@ class Urllib3Backend(BaseSyncBackend):
         self._timeout = timeout
         self._follow_redirects = follow_redirects
         self._retries = retries
+        self._stream = stream
 
     def _send(self, request: Request) -> Response:
         """
@@ -96,16 +111,17 @@ class Urllib3Backend(BaseSyncBackend):
             "headers": _merged_headers(request),
             "timeout": urllib3.Timeout(total=self._timeout),
             "redirect": self._follow_redirects,
-            "preload_content": True,
+            "preload_content": not self._stream,
         }
         if self._retries is not None:
             arguments["retries"] = self._retries
         answer = self._pool.urlopen(request.method, request.url.as_str(), **arguments)
+        body: BodyTypes = _streamed_body(answer) if self._stream else answer.data
         return Response(
             answer.status,
             # urllib3's HTTPHeaderDict keeps multiple lines per field
             headers=list(answer.headers.items()),
-            body=answer.data,
+            body=body,
             reason=answer.reason,
             http_version=_HTTP_VERSIONS.get(answer.version, "HTTP/1.1"),
             request=request,
@@ -161,6 +177,31 @@ class Urllib3Backend(BaseSyncBackend):
         :return: the backend class name (no configuration secrets)
         """
         return f"{self.__class__.__name__}()"
+
+
+def _streamed_body(answer: urllib3.BaseHTTPResponse) -> IterableBody:
+    """
+    The response body as a streaming producer: chunks are read from the
+    open connection on demand. A fully consumed body releases the
+    connection back into the pool; an abandoned one closes it (a
+    partially read connection must never be reused).
+
+    :param answer: the urllib3 response (with ``preload_content=False``)
+    :return: the body producer
+    """
+
+    def chunks() -> Iterator[bytes]:
+        completed = False
+        try:
+            yield from answer.stream(_CHUNK_SIZE)
+            completed = True
+        finally:
+            if completed:
+                answer.release_conn()
+            else:
+                answer.close()
+
+    return IterableBody(chunks())
 
 
 def _merged_headers(request: Request) -> dict[str, str]:
