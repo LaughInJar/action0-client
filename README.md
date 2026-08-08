@@ -13,6 +13,22 @@ depending on the backend. Built on
 [action0-url](https://github.com/LaughInJar/action0-url) (URL
 representation).
 
+The same typed operation, driven by three different backends:
+
+```python
+client = APIClient(RequestsBackend(), "https://api.example.com/v1")
+item = client.send(GetItem(item_id=42))  # Item
+
+client = APIClient(AsyncHttpxBackend(), "https://api.example.com/v1")
+item = await client.send(GetItem(item_id=42))  # Awaitable[Item]
+
+client = APIClient(TwistedBackend(), "https://api.example.com/v1")
+deferred = client.send(GetItem(item_id=42))  # Deferred[Item]
+```
+
+(`GetItem` is an ordinary typed operation class, written once — see
+[Usage](#usage) for its definition.)
+
 Requires Python 3.11 or newer.
 
 Full documentation including the API reference:
