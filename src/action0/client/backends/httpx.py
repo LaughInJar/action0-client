@@ -8,12 +8,17 @@ Requires the ``httpx`` extra: ``pip install "action0-client[httpx]"``.
 """
 
 from typing import Any
+from typing import AsyncIterator
 from typing import Iterable
+from typing import Iterator
 
 import httpx
 
 from action0.req import Request
 from action0.req import Response
+from action0.req.body import AsyncIterableBody
+from action0.req.body import BodyTypes
+from action0.req.body import IterableBody
 
 from ..backend import BaseAsyncBackend
 from ..backend import BaseSyncBackend
@@ -24,6 +29,9 @@ from ..hooks import Hook
 DEFAULT_TIMEOUT = 30.0
 """The default number of seconds httpx waits (connect, read, write and
 pool acquisition each)."""
+
+_CHUNK_SIZE = 65536
+"""The chunk size for streamed response bodies."""
 
 
 def _request_arguments(request: Request, async_: bool) -> dict[str, Any]:
@@ -54,24 +62,63 @@ def _request_arguments(request: Request, async_: bool) -> dict[str, Any]:
     return arguments
 
 
-def _convert_response(request: Request, answer: httpx.Response) -> Response:
+def _convert_response(request: Request, answer: httpx.Response, body: "BodyTypes") -> Response:
     """
-    Convert an ``httpx.Response`` (with the body already read) back into an
+    Convert an ``httpx.Response`` back into an
     :py:class:`~action0.req.response.Response`.
 
     :param request: the request that produced the response
     :param answer: the httpx response
+    :param body: the response body — the preloaded bytes, or a streaming
+                 producer over the still-open connection
     :return: the converted response
     """
     return Response(
         answer.status_code,
         # multi_items() keeps multiple lines per field intact
         headers=answer.headers.multi_items(),
-        body=answer.content,
+        body=body,
         reason=answer.reason_phrase or None,
         http_version=answer.http_version,
         request=request,
     )
+
+
+def _streamed_body(answer: httpx.Response) -> IterableBody:
+    """
+    The response body as a streaming producer: chunks are read from the
+    open connection on demand, and the response is closed once the body
+    is consumed (or the producer is garbage-collected).
+
+    :param answer: the httpx response (sent with ``stream=True``)
+    :return: the body producer
+    """
+
+    def chunks() -> Iterator[bytes]:
+        try:
+            yield from answer.iter_bytes(_CHUNK_SIZE)
+        finally:
+            answer.close()
+
+    return IterableBody(chunks())
+
+
+def _streamed_abody(answer: httpx.Response) -> AsyncIterableBody:
+    """
+    The async flavor of :py:func:`_streamed_body`.
+
+    :param answer: the httpx response (sent with ``stream=True``)
+    :return: the body producer
+    """
+
+    async def achunks() -> AsyncIterator[bytes]:
+        try:
+            async for chunk in answer.aiter_bytes(_CHUNK_SIZE):
+                yield chunk
+        finally:
+            await answer.aclose()
+
+    return AsyncIterableBody(achunks())
 
 
 def _translate(error: Exception, request: Request) -> BaseException:
@@ -103,6 +150,12 @@ class HttpxBackend(BaseSyncBackend):
         with HttpxBackend() as backend:
             response = Client(backend).send(Request("https://example.com/"))
             print(response.status)
+
+    Streaming *response* bodies are opt-in: with ``stream=True`` the
+    response body is an :py:class:`~action0.req.body.IterableBody`
+    producing the bytes as they arrive instead of preloaded bytes; the
+    connection is held until the body is consumed (or the producer is
+    garbage-collected).
     """
 
     def __init__(
@@ -111,6 +164,7 @@ class HttpxBackend(BaseSyncBackend):
         *,
         timeout: "float | None" = DEFAULT_TIMEOUT,
         follow_redirects: bool = True,
+        stream: bool = False,
         hooks: Iterable[Hook] = (),
     ) -> None:
         """
@@ -123,6 +177,9 @@ class HttpxBackend(BaseSyncBackend):
         :param timeout: the seconds httpx waits (for connect, read, write
                         and pool acquisition each); ``None`` waits forever
         :param follow_redirects: whether 3xx responses are followed
+        :param stream: whether response bodies arrive as streaming
+                       producers instead of preloaded bytes (``send``
+                       then returns at headers arrival)
         :param hooks: the instrumentation hooks to run around every send
         """
         super().__init__(hooks)
@@ -132,6 +189,7 @@ class HttpxBackend(BaseSyncBackend):
             else httpx.Client(timeout=timeout, follow_redirects=follow_redirects)
         )
         self._owns_client = client is None
+        self._stream = stream
 
     def _send(self, request: Request) -> Response:
         """
@@ -141,7 +199,11 @@ class HttpxBackend(BaseSyncBackend):
         :return: the response
         """
         arguments = _request_arguments(request, async_=False)
-        return _convert_response(request, self._client.request(**arguments))
+        if self._stream:
+            answer = self._client.send(self._client.build_request(**arguments), stream=True)
+            return _convert_response(request, answer, _streamed_body(answer))
+        answer = self._client.request(**arguments)
+        return _convert_response(request, answer, answer.content)
 
     def translate_error(self, error: Exception, request: Request) -> BaseException:
         """
@@ -203,6 +265,12 @@ class AsyncHttpxBackend(BaseAsyncBackend):
 
 
         asyncio.run(main())
+
+    Streaming *response* bodies are opt-in: with ``stream=True`` the
+    response body is an :py:class:`~action0.req.body.AsyncIterableBody`
+    producing the bytes as they arrive instead of preloaded bytes; the
+    connection is held until the body is consumed (or the producer is
+    garbage-collected).
     """
 
     def __init__(
@@ -211,6 +279,7 @@ class AsyncHttpxBackend(BaseAsyncBackend):
         *,
         timeout: "float | None" = DEFAULT_TIMEOUT,
         follow_redirects: bool = True,
+        stream: bool = False,
         hooks: Iterable[Hook] = (),
     ) -> None:
         """
@@ -223,6 +292,9 @@ class AsyncHttpxBackend(BaseAsyncBackend):
         :param timeout: the seconds httpx waits (for connect, read, write
                         and pool acquisition each); ``None`` waits forever
         :param follow_redirects: whether 3xx responses are followed
+        :param stream: whether response bodies arrive as streaming
+                       producers instead of preloaded bytes (``send``
+                       then returns at headers arrival)
         :param hooks: the instrumentation hooks to run around every send
         """
         super().__init__(hooks)
@@ -232,6 +304,7 @@ class AsyncHttpxBackend(BaseAsyncBackend):
             else httpx.AsyncClient(timeout=timeout, follow_redirects=follow_redirects)
         )
         self._owns_client = client is None
+        self._stream = stream
 
     async def _send(self, request: Request) -> Response:
         """
@@ -241,7 +314,11 @@ class AsyncHttpxBackend(BaseAsyncBackend):
         :return: (an awaitable of) the response
         """
         arguments = _request_arguments(request, async_=True)
-        return _convert_response(request, await self._client.request(**arguments))
+        if self._stream:
+            answer = await self._client.send(self._client.build_request(**arguments), stream=True)
+            return _convert_response(request, answer, _streamed_abody(answer))
+        answer = await self._client.request(**arguments)
+        return _convert_response(request, answer, answer.content)
 
     def translate_error(self, error: Exception, request: Request) -> BaseException:
         """

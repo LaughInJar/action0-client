@@ -17,6 +17,7 @@ from action0.client.backends.requests import RequestsBackend
 from action0.client.backends.requests import _merged_headers
 from action0.client.backends.requests import _request_data
 from action0.req import Request
+from action0.req.body import BodyProducer
 from action0.req.body import BytesBody
 
 
@@ -171,6 +172,20 @@ class RequestsBackendTestCase(unittest.TestCase):
         with RequestsBackend(timeout=1) as backend:
             with self.assertRaises(TransportError):
                 backend.send(Request(f"http://127.0.0.1:{port}/"))
+
+    def test_streamed_response_body(self) -> None:
+        """
+        Test stream=True: the body arrives as a producer over the open
+        connection and yields the same content a preloading send would.
+        """
+        with RequestsBackend(stream=True) as backend:
+            response = backend.send(Request(f"{self.base_url}/items"))
+            self.assertIsInstance(response.body, BodyProducer)
+            self.assertNotIsInstance(response.body, (bytes, str))
+
+            body = response.body_bytes()  # joins the chunks
+            assert body is not None
+            self.assertEqual(json.loads(body)["path"], "/items")
 
     def test_close_semantics(self) -> None:
         """

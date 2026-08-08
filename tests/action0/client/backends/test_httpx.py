@@ -7,6 +7,7 @@ from action0.client import TransportError
 from action0.client.backends.httpx import AsyncHttpxBackend
 from action0.client.backends.httpx import HttpxBackend
 from action0.req import Request
+from action0.req.body import BodyProducer
 from action0.req.body import IterableBody
 
 
@@ -87,6 +88,17 @@ class HttpxBackendTestCase(unittest.TestCase):
         )
         response = self.backend().send(request)
         self.assertEqual(response.body_bytes(), b"chunks")
+
+    def test_streamed_response_body(self) -> None:
+        """
+        Test stream=True: the body arrives as a producer and yields the
+        same content a preloading send would.
+        """
+        transport = httpx.MockTransport(echo_handler)
+        with HttpxBackend(httpx.Client(transport=transport), stream=True) as backend:
+            response = backend.send(Request("https://api.example.com/items", body="ping"))
+            self.assertIsInstance(response.body, BodyProducer)
+            self.assertEqual(response.body_bytes(), b"ping")
 
     def test_timeout_is_translated(self) -> None:
         """
@@ -186,6 +198,24 @@ class AsyncHttpxBackendTestCase(unittest.IsolatedAsyncioTestCase):
         )
         response = await self.backend().send(request)
         self.assertEqual(response.body_bytes(), b"chunks")
+
+    async def test_streamed_response_body(self) -> None:
+        """
+        Test stream=True: the body arrives as an async producer; the
+        chunks stream, the sync accessors refuse.
+        """
+        transport = httpx.MockTransport(echo_handler)
+        client = httpx.AsyncClient(transport=transport)
+        async with AsyncHttpxBackend(client, stream=True) as backend:
+            response = await backend.send(Request("https://api.example.com/items", body="ping"))
+            self.assertIsInstance(response.body, BodyProducer)
+
+            producer = response.body_producer()
+            assert producer is not None
+            chunks = [chunk async for chunk in producer.achunks()]
+            self.assertEqual(b"".join(chunks), b"ping")
+            with self.assertRaises(RuntimeError):
+                response.body_bytes()  # an async body has no sync view
 
     async def test_timeout_is_translated(self) -> None:
         """
