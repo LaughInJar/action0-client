@@ -121,7 +121,7 @@ docs = [
 [[package]]
 name = "action0-req"
 version = "0.1.0"
-source = { git = "https://github.com/LaughInJar/action0-req?branch=main#da042fbdc29424f3b85975404a5469782356c6cf" }
+source = { git = "https://github.com/LaughInJar/action0-req?branch=main#43d49c867c29e0bee55674ee4cedb714c26f846c" }
 dependencies = [
     { name = "action0-url" },
 ]
