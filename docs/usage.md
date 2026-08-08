@@ -316,6 +316,14 @@ for idempotent methods only (`methods=None` lifts that gate). When the
 attempt budget is exhausted, the last response is returned (or the last
 error raised) unchanged — the policy never invents failures.
 
+How long is waited is also the policy's call: exponential backoff with
+"full jitter" — each wait is a uniformly random duration up to the
+exponential delay, so a fleet of clients hitting the same outage does
+not retry in lockstep (`jitter=False` waits the exact delays). A
+`Retry-After` response header (seconds or HTTP-date form) overrides the
+computed wait — the server knows best — capped at the policy's
+`max_backoff`; `respect_retry_after=False` ignores it.
+
 Two execution-model notes: the async wrapper waits with `asyncio.sleep`
 by default — under trio pass `sleep=trio.sleep`; the Twisted wrapper
 takes a `reactor=` for its backoff timer (the global reactor by
