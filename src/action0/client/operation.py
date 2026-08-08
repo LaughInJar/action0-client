@@ -58,6 +58,7 @@ from action0.req import Request
 from action0.req import Response
 from action0.req.body import BodyTypes
 from action0.url import Url
+from action0.url.params import Params
 from action0.url.params import ParamValue
 
 from .errors import APIError
@@ -65,6 +66,7 @@ from .fields import _METADATA_KEY
 from .fields import FieldSpec
 from .fields import Location
 from .fields import body
+from .fields import form_field
 from .fields import header
 from .fields import json_body
 from .fields import json_field
@@ -127,6 +129,7 @@ def _dataclass_fields(operation: Any) -> "tuple[dataclasses.Field[Any], ...]":
         path_param,
         json_field,
         json_body,
+        form_field,
         body,
     ),
 )
@@ -257,14 +260,15 @@ class Operation(Generic[R_co], ABC):
 
         json_fields = [n for n, s in specs.items() if s.location is Location.JSON_FIELD]
         json_bodies = [n for n, s in specs.items() if s.location is Location.JSON_BODY]
+        form_fields = [n for n, s in specs.items() if s.location is Location.FORM_FIELD]
         raw_bodies = [n for n, s in specs.items() if s.location is Location.BODY]
-        used = [kind for kind in (json_fields, json_bodies, raw_bodies) if kind]
+        used = [kind for kind in (json_fields, json_bodies, form_fields, raw_bodies) if kind]
         if len(json_bodies) > 1 or len(raw_bodies) > 1 or len(used) > 1:
             conflicting = sorted(name for kind in used for name in kind)
             raise TypeError(
                 f"{cls.__name__}: the fields {conflicting} declare more than one request"
-                " body — use several json_field()s, or a single json_body(), or a single"
-                " body()"
+                " body — use several json_field()s (or form_field()s), or a single"
+                " json_body(), or a single body()"
             )
 
     @classmethod
@@ -287,8 +291,8 @@ class Operation(Generic[R_co], ABC):
         describes: the rendered path template appended to the base URL, the
         query/header/body fields serialized into their places (fields whose
         value is ``None`` are omitted), plus a ``Content-Type`` for a JSON
-        body and the :py:attr:`accept` header — each only if not already
-        set.
+        or form body and the :py:attr:`accept` header — each only if not
+        already set.
 
         Called by :py:meth:`action0.client.api.APIClient.send`, but also
         useful standalone, e.g. in tests. Override it (adjusting the result
@@ -315,12 +319,16 @@ class Operation(Generic[R_co], ABC):
         has_json_fields = False
         json_payload: Any = None
         has_json_payload = False
+        form_params = Params()
+        has_form_fields = False
         raw_body: "BodyTypes | None" = None
 
         for field in _dataclass_fields(self):
             spec = self._field_spec(field)
             if spec.location is Location.JSON_FIELD:
                 has_json_fields = True
+            elif spec.location is Location.FORM_FIELD:
+                has_form_fields = True
 
             value = getattr(self, field.name)
             if value is not None and spec.serialize is not None:
@@ -344,6 +352,8 @@ class Operation(Generic[R_co], ABC):
             elif spec.location is Location.JSON_BODY:
                 json_payload = self.serialize_json_value(value)
                 has_json_payload = True
+            elif spec.location is Location.FORM_FIELD:
+                form_params.add(name, self.serialize_value(value))
             else:  # Location.BODY
                 raw_body = cast("BodyTypes", value)
 
@@ -359,6 +369,10 @@ class Operation(Generic[R_co], ABC):
             request_body = json.dumps(payload)
             if Header.CONTENT_TYPE not in headers:
                 headers.add(Header.CONTENT_TYPE, "application/json")
+        elif has_form_fields and raw_body is None:
+            request_body = form_params.as_str()
+            if Header.CONTENT_TYPE not in headers:
+                headers.add(Header.CONTENT_TYPE, "application/x-www-form-urlencoded")
 
         if self.accept is not None and Header.ACCEPT not in headers:
             headers.add(Header.ACCEPT, self.accept)

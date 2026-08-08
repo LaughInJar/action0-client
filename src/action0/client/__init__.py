@@ -43,6 +43,7 @@ from .errors import TransportError
 from .fields import FieldSpec
 from .fields import Location
 from .fields import body
+from .fields import form_field
 from .fields import header
 from .fields import json_body
 from .fields import json_field
@@ -93,6 +94,7 @@ __all__ = [
     "TimeoutError",
     "TransportError",
     "body",
+    "form_field",
     "header",
     "json_body",
     "json_field",

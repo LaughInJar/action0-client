@@ -10,6 +10,7 @@ from action0.client import JsonOperation
 from action0.client import Operation
 from action0.client.fields import Location
 from action0.client.fields import body
+from action0.client.fields import form_field
 from action0.client.fields import header
 from action0.client.fields import json_body
 from action0.client.fields import json_field
@@ -133,6 +134,20 @@ class DefinitionTestCase(unittest.TestCase):
                 path = "/x"
                 one: dict = json_body()  # type: ignore[type-arg]
                 two: dict = json_body()  # type: ignore[type-arg]
+
+        with self.assertRaisesRegex(TypeError, "more than one request body"):
+
+            class FormAndJson(JsonOperation[Any]):
+                path = "/x"
+                grant_type: str = form_field()
+                name: str = json_field()
+
+        with self.assertRaisesRegex(TypeError, "more than one request body"):
+
+            class FormAndRaw(JsonOperation[Any]):
+                path = "/x"
+                grant_type: str = form_field()
+                raw: bytes = body()
 
     def test_fields_are_inherited(self) -> None:
         """
@@ -299,6 +314,83 @@ class AsRequestTestCase(unittest.TestCase):
 
         request = Create(draft=Draft(name="Thing")).as_request()
         self.assertEqual(request.body, '{"name": "Thing"}')
+
+    def test_form_field_body(self) -> None:
+        """
+        Test the urlencoded body assembled from form_field()s: percent
+        encoding, wire-name aliases, None omission, list repetition and
+        the Content-Type.
+        """
+
+        class Token(JsonOperation[Any]):
+            method = Method.POST
+            path = "/oauth/token"
+            grant_type: str = form_field()
+            client_secret: str = form_field(repr=False)
+            code: "str | None" = form_field(default=None)
+            scopes: "list[str] | None" = form_field("scope", default=None)
+
+        request = Token(
+            grant_type="authorization_code", client_secret="s&cret", scopes=["read", "write"]
+        ).as_request("https://auth.example.com")
+        self.assertEqual(
+            request.body,
+            "grant_type=authorization_code&client_secret=s%26cret&scope=read&scope=write",
+        )
+        self.assertEqual(request.headers["Content-Type"], "application/x-www-form-urlencoded")
+        # the None field stayed out of the body, the secret out of the repr
+        self.assertNotIn("code=", str(request.body))
+        self.assertNotIn("s&cret", repr(Token(grant_type="x", client_secret="s&cret")))
+
+    def test_form_fields_do_not_touch_the_query(self) -> None:
+        """
+        Test that form fields go into the body only — query fields on the
+        same operation keep working alongside.
+        """
+
+        class Update(JsonOperation[Any]):
+            method = Method.POST
+            path = "/items"
+            dry_run: bool = query("dryRun", default=False)
+            name: str = form_field()
+
+        request = Update(name="Thing", dry_run=True).as_request("https://api.example.com")
+        self.assertEqual(request.url.as_str(), "https://api.example.com/items?dryRun=true")
+        self.assertEqual(request.body, "name=Thing")
+
+    def test_form_content_type_is_not_overridden(self) -> None:
+        """
+        Test that an explicit Content-Type header field wins over the
+        automatic one.
+        """
+
+        class Custom(JsonOperation[Any]):
+            method = Method.POST
+            path = "/items"
+            content_type: str = header("Content-Type", default="application/vnd.form")
+            name: str = form_field()
+
+        request = Custom(name="x").as_request()
+        self.assertEqual(request.headers.get_all("Content-Type"), ["application/vnd.form"])
+
+    def test_default_location_can_be_form(self) -> None:
+        """
+        Test that a form-heavy API family can route plain fields into the
+        form body via default_location.
+        """
+
+        class FormFamily(JsonOperation[Any]):
+            default_location: ClassVar[Location] = Location.FORM_FIELD
+
+        class Login(FormFamily):
+            method = Method.POST
+            path = "/login"
+            username: str
+            password: str
+
+        request = Login(username="u", password="p w").as_request()
+        self.assertEqual(request.body, "username=u&password=p+w")
+        self.assertEqual(request.headers["Content-Type"], "application/x-www-form-urlencoded")
 
     def test_raw_body_passes_through(self) -> None:
         """

@@ -64,6 +64,9 @@ class Location(Enum):
     JSON_BODY = "json-body"
     """The entire request body, serialized as JSON."""
 
+    FORM_FIELD = "form-field"
+    """A key of the ``application/x-www-form-urlencoded`` request body."""
+
     BODY = "body"
     """The entire request body, raw: ``bytes``, ``str`` or a
     :py:class:`~action0.req.body.BodyProducer`."""
@@ -205,6 +208,36 @@ def json_field(
     :return: the dataclass field
     """
     spec = FieldSpec(Location.JSON_FIELD, alias=name, serialize=serialize)
+    return _field(spec, default, default_factory, repr)
+
+
+def form_field(
+    name: str | None = None,
+    *,
+    default: Any = dataclasses.MISSING,
+    default_factory: Any = dataclasses.MISSING,
+    serialize: Callable[[Any], Any] | None = None,
+    repr: bool = True,
+) -> Any:
+    """
+    Declare an operation field sent as one key of an
+    ``application/x-www-form-urlencoded`` request body — the classic HTML
+    form POST (and the shape of OAuth token endpoints). All ``form_field``
+    fields of an operation together form that body; values serialize like
+    query parameters (a list produces one ``name=value`` pair per element,
+    ``None`` omits the key). Cannot be combined with the JSON body
+    specifiers or :py:func:`body`.
+
+    :param name: the form key on the wire; ``None`` uses the field name
+    :param default: the field default; without one the field is required
+    :param default_factory: a factory producing the default (for mutable
+                            defaults like lists)
+    :param serialize: a custom serializer applied to the value first
+    :param repr: whether the field shows up in the operation's ``repr()`` —
+                 pass ``False`` for credentials (e.g. OAuth client secrets)
+    :return: the dataclass field
+    """
+    spec = FieldSpec(Location.FORM_FIELD, alias=name, serialize=serialize)
     return _field(spec, default, default_factory, repr)
 
 
