@@ -14,11 +14,14 @@ wrapped backend — and therefore its hooks — is not involved at all.
 Entries are stored in a :py:class:`CacheStore` — the bundled
 :py:class:`MemoryCache` is a thread-safe in-process LRU with per-entry
 expiry; bring your own store (memcached, redis, ...) by implementing the
-two-method protocol. Store calls are synchronous in every execution
-model and are expected to be fast.
+two-method protocol. Store calls are synchronous and expected to be fast
+— except on :py:class:`CachingAsyncBackend`, which also accepts an
+:py:class:`AsyncCacheStore` (awaitable ``get``/``set``) for stores that
+do network I/O of their own, like redis or memcached.
 """
 
 import hashlib
+import inspect
 import threading
 import time
 from collections import OrderedDict
@@ -66,6 +69,36 @@ class CacheStore(Protocol):
         :param key: the cache key
         :param response: the response to store
         :param ttl: the seconds the entry may be served
+        """
+        ...
+
+
+class AsyncCacheStore(Protocol):
+    """
+    The awaitable flavor of :py:class:`CacheStore`, for stores that do
+    network I/O of their own — redis, memcached and friends, driven by
+    their asyncio clients. Accepted by :py:class:`CachingAsyncBackend`
+    only: the sync and Twisted wrappers have no natural place to await.
+    """
+
+    def get(self, key: str) -> "Awaitable[Response | None]":
+        """
+        Look up a cached response.
+
+        :param key: the cache key
+        :return: (an awaitable of) the cached response, or ``None`` for
+                 a miss (including expired entries)
+        """
+        ...
+
+    def set(self, key: str, response: Response, ttl: float) -> Awaitable[None]:
+        """
+        Store a response.
+
+        :param key: the cache key
+        :param response: the response to store
+        :param ttl: the seconds the entry may be served
+        :return: an awaitable completing once stored
         """
         ...
 
@@ -312,25 +345,28 @@ class CachingAsyncBackend:
     """
     A caching wrapper around an async backend — itself a
     ``Backend[Awaitable[Response]]``, so it plugs into the clients like
-    the backend it wraps. The store is called synchronously from inside
-    the coroutine; keep it fast (the bundled :py:class:`MemoryCache` is).
+    the backend it wraps. Takes either store flavor: a plain
+    :py:class:`CacheStore` is called synchronously from inside the
+    coroutine (keep it fast — the bundled :py:class:`MemoryCache` is),
+    an :py:class:`AsyncCacheStore` is awaited, so it may do network I/O
+    of its own (redis, memcached, ...).
     """
 
     def __init__(
         self,
         inner: Backend[Awaitable[Response]],
         policy: CachePolicy = CachePolicy(),
-        store: "CacheStore | None" = None,
+        store: "CacheStore | AsyncCacheStore | None" = None,
     ) -> None:
         """
         :param inner: the backend that actually sends
         :param policy: what to cache and for how long
-        :param store: where entries live; ``None`` creates a
-                      :py:class:`MemoryCache`
+        :param store: where entries live, sync or async; ``None`` creates
+                      a :py:class:`MemoryCache`
         """
         self._inner = inner
         self._policy = policy
-        self._store = store if store is not None else MemoryCache()
+        self._store: "CacheStore | AsyncCacheStore" = store if store is not None else MemoryCache()
 
     @property
     def inner(self) -> Backend[Awaitable[Response]]:
@@ -338,9 +374,35 @@ class CachingAsyncBackend:
         return self._inner
 
     @property
-    def store(self) -> CacheStore:
+    def store(self) -> "CacheStore | AsyncCacheStore":
         """The cache store (e.g. for clearing it)."""
         return self._store
+
+    async def _lookup(self, key: str) -> "Response | None":
+        """
+        Look up an entry in whichever store flavor is plugged in.
+
+        :param key: the cache key
+        :return: the cached response, or ``None`` for a miss
+        """
+        found = self._store.get(key)
+        if inspect.isawaitable(found):
+            # an AsyncCacheStore — isawaitable is a TypeIs, so the sync
+            # flavor is narrowed out in the else path (ty loses the await
+            # result type here; mypy would flag a cast as redundant)
+            return await found  # ty: ignore[invalid-return-type]
+        return found
+
+    async def _keep(self, key: str, response: Response) -> None:
+        """
+        Store an entry in whichever store flavor is plugged in.
+
+        :param key: the cache key
+        :param response: the (already copied) response to store
+        """
+        stored = self._store.set(key, response, self._policy.ttl)
+        if inspect.isawaitable(stored):
+            await stored
 
     async def send(self, request: Request) -> Response:
         """
@@ -354,12 +416,12 @@ class CachingAsyncBackend:
         if not self._policy.should_lookup(request):
             return await self._inner.send(request)
         key = self._policy.key_for(request)
-        cached = self._store.get(key)
+        cached = await self._lookup(key)
         if cached is not None:
             return _fresh_copy(cached, request)
         response = await self._inner.send(request)
         if self._policy.should_store(request, response):
-            self._store.set(key, response.copy(), self._policy.ttl)
+            await self._keep(key, response.copy())
         return response
 
     def map(self, result: Awaitable[T], fn: Callable[[T], S]) -> Awaitable[S]:
