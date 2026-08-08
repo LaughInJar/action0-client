@@ -79,8 +79,8 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "action0-req", git = "https://github.com/LaughInJar/action0-req?branch=main" },
-    { name = "action0-url", git = "https://github.com/LaughInJar/action0-url?branch=main" },
+    { name = "action0-req", specifier = ">=0.1.1" },
+    { name = "action0-url", specifier = ">=0.1.0" },
     { name = "aiohttp", marker = "extra == 'aiohttp'", specifier = ">=3.9" },
     { name = "aiohttp", marker = "extra == 'all'", specifier = ">=3.9" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.27" },
@@ -120,16 +120,24 @@ docs = [
 
 [[package]]
 name = "action0-req"
-version = "0.1.0"
-source = { git = "https://github.com/LaughInJar/action0-req?branch=main#43d49c867c29e0bee55674ee4cedb714c26f846c" }
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "action0-url" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/70/38/9eac4904eaadd376f4366e16a015ae7815c5c3b4b47e0941422fb4ce3dc5/action0_req-0.1.1.tar.gz", hash = "sha256:d04fa61e5ae9de6efad5ea4bd66031ab51c956eb324a528e88827fee66403d44", size = 98143, upload-time = "2026-08-08T06:47:18.501Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ac/0c/31a51d4841103e1f69ecd608e7f7c6e5ea2f04f27ee7d9c1af36ed596805/action0_req-0.1.1-py3-none-any.whl", hash = "sha256:cf911fb26a895c9ec75cf849d08ca5a7b308c3cdb7b48400264a87ddcfb03b93", size = 25540, upload-time = "2026-08-08T06:47:17.436Z" },
 ]
 
 [[package]]
 name = "action0-url"
 version = "0.1.0"
-source = { git = "https://github.com/LaughInJar/action0-url?branch=main#588f200aee4366c088d40fa1cbae0b7a904cd062" }
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c9/6c/c77be6980c1e677f51e99711289d02c8252afd0ca8e95adc41a8458b306d/action0_url-0.1.0.tar.gz", hash = "sha256:c202e5eb7465793282d2d8342fc2128bdd2497d4cfd9dd596aef5d1d86a2c33e", size = 82090, upload-time = "2026-08-08T06:24:41.464Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a5/be/84ebbe2caae13d91b828025cf1ddc964574f640cc4a1fd3dc5bc4eb49a34/action0_url-0.1.0-py3-none-any.whl", hash = "sha256:b10d76c81cc6862345b94a55c6df4e6ba1ab0c098cc1af41c07850cb83a4667d", size = 14791, upload-time = "2026-08-08T06:24:40.285Z" },
+]
 
 [[package]]
 name = "aiohappyeyeballs"

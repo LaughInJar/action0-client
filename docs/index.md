@@ -25,7 +25,7 @@ deferred = client.send(GetItem(item_id=42))  # Deferred[Item]
 {doc}`guide <usage/operations>` shows its definition.)
 
 ```shell
-uv add "action0-client[httpx]"    # not on PyPI yet — install from GitHub for now
+uv add "action0-client[httpx]"
 ```
 
 **Highlights**:

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-`action0-client` is a Python library for building backend-agnostic, fully typed HTTP API clients: the same client and operation classes run synchronously, on asyncio or on Twisted — the plugged-in backend decides, and the static types follow it. It ships the `action0.client` package (`action0` is a PEP 420 namespace package) from a `src/` layout, is built with hatchling, and uses `uv` for environment/dependency management. Runtime dependencies are `action0-req` and `action0-url` (not on PyPI yet, resolved from GitHub via `[tool.uv.sources]`); the HTTP libraries (`requests`, `httpx`, `aiohttp`, `urllib3`, `twisted[tls]`) are optional extras and dev-group dependencies; the `urllib` and thread-pool backends are stdlib-only.
+`action0-client` is a Python library for building backend-agnostic, fully typed HTTP API clients: the same client and operation classes run synchronously, on asyncio or on Twisted — the plugged-in backend decides, and the static types follow it. It ships the `action0.client` package (`action0` is a PEP 420 namespace package) from a `src/` layout, is built with hatchling, and uses `uv` for environment/dependency management. Runtime dependencies are `action0-req` and `action0-url` (from PyPI); the HTTP libraries (`requests`, `httpx`, `aiohttp`, `urllib3`, `twisted[tls]`) are optional extras and dev-group dependencies; the `urllib` and thread-pool backends are stdlib-only.
 
 ## Rules
 
