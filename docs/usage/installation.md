@@ -1,14 +1,13 @@
 # Installation
 
-`action0-client` is not published to PyPI yet; install it straight from
-GitHub. The HTTP libraries are optional — pick the extras matching the
-backend(s) you want:
+Install `action0-client` from PyPI. The HTTP libraries are optional —
+pick the extras matching the backend(s) you want:
 
 ```shell
-uv add "action0-client[httpx] @ git+https://github.com/LaughInJar/action0-client"
+uv add "action0-client[httpx]"
 
 # extras: requests, httpx, aiohttp, urllib3, twisted, all
-pip install "action0-client[requests,twisted] @ git+https://github.com/LaughInJar/action0-client"
+pip install "action0-client[requests,twisted]"
 ```
 
 Without extras you get the core library — clients, operations, test stubs

@@ -149,13 +149,13 @@ models, runnable demo) lives in
 
 ## Installation
 
-Not published to PyPI yet; install straight from GitHub. The HTTP
+Install from [PyPI](https://pypi.org/project/action0-client/). The HTTP
 libraries are optional extras — pick what you need (`requests`, `httpx`,
 `aiohttp`, `urllib3`, `twisted`, `all`); the stdlib `urllib` and thread-pool backends
 work without any extra:
 
 ```shell
-uv add "action0-client[httpx] @ git+https://github.com/LaughInJar/action0-client"
+uv add "action0-client[httpx]"
 ```
 
 ## Development
