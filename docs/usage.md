@@ -186,6 +186,54 @@ with RequestsBackend() as inner, ThreadPoolBackend(inner) as backend:
 Hooks belong on the *wrapped* backend (they run on the pool threads,
 around the actual I/O); the wrapper itself stays out of the way.
 
+### Streaming response bodies
+
+By default every backend preloads the response body into memory. For
+large downloads (or endless feeds) pass `stream=True` to
+{py:class}`~action0.client.backends.requests.RequestsBackend`,
+{py:class}`~action0.client.backends.httpx.HttpxBackend`,
+{py:class}`~action0.client.backends.httpx.AsyncHttpxBackend`,
+{py:class}`~action0.client.backends.aiohttp.AiohttpBackend`,
+{py:class}`~action0.client.backends.urllib.UrllibBackend` or
+{py:class}`~action0.client.backends.urllib3.Urllib3Backend`: `send()`
+then returns as soon as the headers arrived, and the response body is a
+streaming {py:class}`~action0.req.body.BodyProducer` over the still-open
+connection — an {py:class}`~action0.req.body.IterableBody` on the sync
+backends, an {py:class}`~action0.req.body.AsyncIterableBody` on the
+async ones:
+
+```python
+from action0.client import Client
+from action0.client.backends.requests import RequestsBackend
+from action0.req import Request
+
+with RequestsBackend(stream=True) as backend:
+    response = Client(backend).send(Request("https://example.com/big.bin"))
+    producer = response.body_producer()
+    with open("big.bin", "wb") as file:
+        for chunk in producer.chunks():
+            file.write(chunk)
+```
+
+On the async backends, iterate `async for chunk in producer.achunks()`
+instead. What to know:
+
+- The connection is held until the body is consumed; an abandoned
+  producer closes it when garbage-collected. Consume (or drop) bodies
+  promptly.
+- Hooks fire at headers arrival — the `elapsed` an
+  {py:meth}`~action0.client.hooks.Hook.on_response` sees excludes the
+  body transfer.
+- `body_bytes()` / `body_str()` still work on a streamed response (they
+  join the chunks — once); an *async* streamed body can only be read via
+  `achunks()`, the sync accessors raise `RuntimeError`.
+- The caching wrappers never store streamed bodies, and a retry wrapper
+  that throws away a transient streamed response leaves the connection
+  cleanup to garbage collection.
+- {py:class}`~action0.client.backends.twisted.TwistedBackend` has no
+  streaming mode — its `readBody` collects the whole body; use a custom
+  `IProtocol` consumer directly on the Agent if you need that on Twisted.
+
 ### Greenlet stacks (gevent, eventlet)
 
 Nothing extra is needed for [gevent](https://www.gevent.org/) or

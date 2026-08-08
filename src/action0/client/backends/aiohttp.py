@@ -7,12 +7,15 @@ Requires the ``aiohttp`` extra: ``pip install "action0-client[aiohttp]"``.
 
 import asyncio
 from typing import Any
+from typing import AsyncIterator
 from typing import Iterable
 
 import aiohttp
 
 from action0.req import Request
 from action0.req import Response
+from action0.req.body import AsyncIterableBody
+from action0.req.body import BodyTypes
 
 from ..backend import BaseAsyncBackend
 from ..errors import TimeoutError
@@ -22,6 +25,9 @@ from ..hooks import Hook
 DEFAULT_TIMEOUT = 30.0
 """The default total number of seconds from sending until the response
 body finished arriving (aiohttp's ``ClientTimeout(total=...)``)."""
+
+_CHUNK_SIZE = 65536
+"""The chunk size for streamed response bodies."""
 
 
 class AiohttpBackend(BaseAsyncBackend):
@@ -48,7 +54,11 @@ class AiohttpBackend(BaseAsyncBackend):
     ``aiohttp.ClientSession`` must be created inside a running event
     loop), and closed again by :py:meth:`aclose`. Streaming request
     bodies work: a :py:class:`~action0.req.body.BodyProducer` body is
-    handed to aiohttp as its async chunk iterator.
+    handed to aiohttp as its async chunk iterator. Streaming *response*
+    bodies are opt-in: with ``stream=True`` the response body is an
+    :py:class:`~action0.req.body.AsyncIterableBody` producing the bytes
+    as they arrive instead of preloaded bytes; the connection is held
+    until the body is consumed (or garbage-collected).
     """
 
     def __init__(
@@ -57,6 +67,7 @@ class AiohttpBackend(BaseAsyncBackend):
         *,
         timeout: "float | None" = DEFAULT_TIMEOUT,
         follow_redirects: bool = True,
+        stream: bool = False,
         hooks: Iterable[Hook] = (),
     ) -> None:
         """
@@ -66,8 +77,15 @@ class AiohttpBackend(BaseAsyncBackend):
                         again by :py:meth:`aclose`. The ``timeout``
                         argument only applies to the created session.
         :param timeout: the total seconds from sending until the response
-                        body finished arriving; ``None`` waits forever
+                        body finished arriving; ``None`` waits forever.
+                        NOTE: with ``stream=True`` this budget spans the
+                        body consumption too — for long-lived streams pass
+                        a session with a tailored ``ClientTimeout`` (e.g.
+                        ``sock_read`` instead of ``total``)
         :param follow_redirects: whether 3xx responses are followed
+        :param stream: whether response bodies arrive as streaming
+                       producers instead of preloaded bytes (``send``
+                       then returns at headers arrival)
         :param hooks: the instrumentation hooks to run around every send
         """
         super().__init__(hooks)
@@ -75,6 +93,7 @@ class AiohttpBackend(BaseAsyncBackend):
         self._owns_session = session is None
         self._timeout = timeout
         self._follow_redirects = follow_redirects
+        self._stream = stream
 
     def _live_session(self) -> aiohttp.ClientSession:
         """
@@ -102,15 +121,18 @@ class AiohttpBackend(BaseAsyncBackend):
             else:
                 body = request.body.achunks()
 
-        async with self._live_session().request(
+        answer = await self._live_session().request(
             request.method,
             request.url.as_str(),
             # a list of pairs keeps multiple lines per field intact
             headers=request.headers.as_lines(),
             data=body,
             allow_redirects=self._follow_redirects,
-        ) as answer:
-            content = await answer.read()
+        )
+        try:
+            content: "BodyTypes | None" = (
+                _streamed_body(answer) if self._stream else await answer.read()
+            )
             version = answer.version
             return Response(
                 answer.status,
@@ -123,6 +145,11 @@ class AiohttpBackend(BaseAsyncBackend):
                 else "HTTP/1.1",
                 request=request,
             )
+        finally:
+            # a preloaded response is done with its connection here; a
+            # streamed one keeps it until the body producer finishes
+            if not self._stream:
+                answer.release()
 
     def translate_error(self, error: Exception, request: Request) -> BaseException:
         """
@@ -170,3 +197,24 @@ class AiohttpBackend(BaseAsyncBackend):
         :return: the backend class name (no configuration secrets)
         """
         return f"{self.__class__.__name__}()"
+
+
+def _streamed_body(answer: aiohttp.ClientResponse) -> AsyncIterableBody:
+    """
+    The response body as a streaming producer: chunks are read from the
+    open connection on demand. ``release()`` in the end returns a fully
+    read connection to the pool and closes a partially read one (aiohttp
+    never reuses a connection with pending data).
+
+    :param answer: the aiohttp response, body not yet read
+    :return: the body producer
+    """
+
+    async def achunks() -> AsyncIterator[bytes]:
+        try:
+            async for chunk in answer.content.iter_chunked(_CHUNK_SIZE):
+                yield chunk
+        finally:
+            answer.release()
+
+    return AsyncIterableBody(achunks())
