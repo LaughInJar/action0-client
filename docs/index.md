@@ -50,6 +50,6 @@ personal projects.
 ```{toctree}
 :maxdepth: 2
 
-usage
+usage/index
 api
 ```
