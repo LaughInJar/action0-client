@@ -30,6 +30,34 @@ environment variables by default (or takes a
 `urllib.request.ProxyHandler`); for urllib3 pass a
 `urllib3.ProxyManager` as the pool.
 
+## Pagination
+
+An offset-paginated listing becomes a small generator around the page
+operation — send, yield, bump the offset until the reported total is
+reached:
+
+```python
+from typing import Iterator
+
+from action0.client import SyncBackend
+
+
+def iter_pokemon(client: PokeAPIClient[SyncBackend], page_size: int = 100) -> Iterator[str]:
+    offset = 0
+    while True:
+        page = client.send(ListPokemon(limit=page_size, offset=offset))
+        yield from page.names
+        offset += page_size
+        if offset >= page.count:
+            return
+```
+
+Generators are lazy, so the loop stops requesting as soon as the caller
+stops consuming (`itertools.islice` and friends). The runnable version —
+operations, client and this loop against the real, public PokéAPI —
+lives in
+[examples/pokeapi.py](https://github.com/LaughInJar/action0-client/blob/main/examples/pokeapi.py).
+
 ## Metrics and tracing hooks
 
 A {py:class}`~action0.client.hooks.Hook` sees every send — including
