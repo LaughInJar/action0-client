@@ -4,8 +4,9 @@
 [![PyPI](https://img.shields.io/pypi/v/action0-client)](https://pypi.org/project/action0-client/)
 
 Backend-agnostic, fully typed HTTP API clients: describe your API once —
-as typed operations — and run it synchronously, on asyncio or on Twisted,
-just by plugging in a different backend. The type checker follows along:
+as typed operations — and run it synchronously, on asyncio, on Twisted —
+or on an execution model of your own — just by plugging in a different
+backend. The type checker follows along:
 the same `send()` returns a value, an `Awaitable` or a `Deferred`,
 depending on the backend. Built on
 [action0-req](https://github.com/LaughInJar/action0-req)
@@ -13,7 +14,7 @@ depending on the backend. Built on
 [action0-url](https://github.com/LaughInJar/action0-url) (URL
 representation).
 
-The same typed operation, driven by three different backends:
+The same typed operation, driven by three of the backends:
 
 ```python
 client = APIClient(RequestsBackend(), "https://api.example.com/v1")
@@ -29,13 +30,24 @@ deferred = client.send(GetItem(item_id=42))  # Deferred[Item]
 (`GetItem` is an ordinary typed operation class, written once — see
 [Usage](#usage) for its definition.)
 
+Eight backends are included —
+[requests](https://requests.readthedocs.io/),
+[httpx](https://www.python-httpx.org/) (sync and async),
+[aiohttp](https://docs.aiohttp.org/),
+[urllib3](https://urllib3.readthedocs.io/) and
+[Twisted](https://twisted.org/), each behind an optional extra, plus
+stdlib-only `urllib` and thread-pool backends — and the list is open: a
+backend is one small structural protocol, so [writing your
+own](https://laughinjar.github.io/action0-client/usage/custom-backends.html)
+takes two methods, and it drives the same clients and operations.
+
 Requires Python 3.11 or newer.
 
 Full documentation including the API reference:
 <https://laughinjar.github.io/action0-client/>
 
-**Status:** the core API is complete — the backend protocol with
-requests/httpx/Twisted implementations and instrumentation hooks, the raw
+**Status:** the core API is complete — the backend protocol with the
+eight backend implementations and instrumentation hooks, the raw
 `Client`, the typed `Operation`/`JsonOperation`/`APIClient` layer, and the
 stub backends for testing.
 

@@ -1,14 +1,15 @@
 # action0-client
 
 Backend-agnostic, fully typed HTTP API clients: describe your API once —
-as typed operations — and run it synchronously, on asyncio or on Twisted,
-just by plugging in a different backend. Built on
+as typed operations — and run it synchronously, on asyncio, on Twisted —
+or on an execution model of your own — just by plugging in a different
+backend. Built on
 [action0-req](https://laughinjar.github.io/action0-req/) (the
 request/response representation) and
 [action0-url](https://laughinjar.github.io/action0-url/) (the URL
 representation).
 
-The same typed operation, driven by three different backends:
+The same typed operation, driven by three of the backends:
 
 ```python
 client = APIClient(RequestsBackend(), "https://api.example.com/v1")
@@ -23,6 +24,17 @@ deferred = client.send(GetItem(item_id=42))  # Deferred[Item]
 
 (`GetItem` is an ordinary typed operation class, written once — the
 {doc}`guide <usage/operations>` shows its definition.)
+
+Eight backends are included —
+[requests](https://requests.readthedocs.io/),
+[httpx](https://www.python-httpx.org/) (sync and async),
+[aiohttp](https://docs.aiohttp.org/),
+[urllib3](https://urllib3.readthedocs.io/) and
+[Twisted](https://twisted.org/), each behind an optional extra, plus
+stdlib-only `urllib` and thread-pool backends — and the list is open: a
+backend is one small structural protocol, so {doc}`writing your own
+<usage/custom-backends>` takes two methods, and it drives the same
+clients and operations.
 
 ```shell
 uv add "action0-client[httpx]"
@@ -40,13 +52,7 @@ uv add "action0-client[httpx]"
   generic over the execution model's wrapper type — implement two methods
   and anything can drive the same clients, *including execution models
   this library has never heard of* (`Client.send` returns whatever your
-  backend's `send` returns). Built-in:
-  [requests](https://requests.readthedocs.io/),
-  [httpx](https://www.python-httpx.org/) (sync + async),
-  [aiohttp](https://docs.aiohttp.org/) and
-  [Twisted](https://twisted.org/) — each behind an optional dependency —
-  plus two stdlib-only ones: `urllib` and a thread-pool backend returning
-  `concurrent.futures.Future` results.
+  backend's `send` returns).
 - Endpoints as typed dataclasses:
   {py:class}`~action0.client.operation.Operation` fixes method and path
   per class, the field specifiers of {py:mod}`action0.client.fields`
