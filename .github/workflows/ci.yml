@@ -60,6 +60,10 @@ jobs:
       - name: example demo
         run: uv run python examples/petstore.py
 
+      # the stub-backed demo; --live (the real PokéAPI) is manual only
+      - name: pokeapi example demo
+        run: uv run python examples/pokeapi.py
+
   docs:
     name: docs build
     runs-on: ubuntu-latest

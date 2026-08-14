@@ -213,3 +213,6 @@ For dynamic per-request work (signing, token refresh) override
 The complete, runnable version of this client — models, operations,
 client, all three execution models and the stub-backed demo — lives in
 [examples/petstore.py](https://github.com/LaughInJar/action0-client/blob/main/examples/petstore.py).
+For the same machinery against a real, public API — including pagination
+and a cached, retrying backend — see
+[examples/pokeapi.py](https://github.com/LaughInJar/action0-client/blob/main/examples/pokeapi.py).

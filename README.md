@@ -157,7 +157,10 @@ assert backend.requests[0].url.path == "/v1/items/42"
 
 A complete example client (models, operations, auth, all three execution
 models, runnable demo) lives in
-[examples/petstore.py](examples/petstore.py).
+[examples/petstore.py](examples/petstore.py);
+[examples/pokeapi.py](examples/pokeapi.py) runs the same machinery —
+plus pagination and a cached, retrying backend — against the real,
+public [PokéAPI](https://pokeapi.co).
 
 ## Installation
 
