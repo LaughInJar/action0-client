@@ -41,6 +41,16 @@ backend is one small structural protocol, so [writing your
 own](https://laughinjar.github.io/action0-client/usage/custom-backends.html)
 takes two methods, and it drives the same clients and operations.
 
+Two companion projects build on this one:
+[action0-client-openapi](https://github.com/LaughInJar/action0-client-openapi)
+generates the typed operations, models and client for a whole API from
+its OpenAPI schema — readable, checked-in code that depends on
+`action0-client` alone; and
+[action0-github-api](https://github.com/LaughInJar/action0-github-api)
+is a fully typed GitHub REST API client that showcases the patterns on a
+real API: typed pagination, conditional requests via a hook, a tuned
+retry policy and streaming release-asset downloads.
+
 Requires Python 3.11 or newer.
 
 Full documentation including the API reference:
