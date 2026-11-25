@@ -20,6 +20,8 @@ from typing import TypeVar
 from typing import assert_type
 from typing import cast
 
+import httpx
+import httpx2
 from twisted.internet.defer import Deferred
 
 from action0.client import APIClient
@@ -35,6 +37,8 @@ from action0.client.backends.aiohttp import AiohttpBackend
 from action0.client.backends.futures import ThreadPoolBackend
 from action0.client.backends.httpx import AsyncHttpxBackend
 from action0.client.backends.httpx import HttpxBackend
+from action0.client.backends.httpx2 import AsyncHttpx2Backend
+from action0.client.backends.httpx2 import Httpx2Backend
 from action0.client.backends.requests import RequestsBackend
 from action0.client.backends.twisted import TwistedBackend
 from action0.client.backends.urllib import UrllibBackend
@@ -206,6 +210,44 @@ def check_wrapper_subclass_preserves_types() -> None:
     client = APIClient(_Throttled(AsyncHttpxBackend()), "https://api.example.com")
     assert_type(client.send(GetItem(item_id=1)), Awaitable[Item])
     assert_type(client.backend, _Throttled)
+
+
+def check_httpx_family_backends_keep_their_library() -> None:
+    """Each backend takes and hands out the client classes of ITS library."""
+    assert_type(HttpxBackend(httpx.Client()).client, httpx.Client)
+    assert_type(Httpx2Backend(httpx2.Client()).client, httpx2.Client)
+    assert_type(Httpx2Backend().client, httpx2.Client)
+    AsyncHttpxBackend(httpx.AsyncClient())
+    AsyncHttpx2Backend(httpx2.AsyncClient())
+    AsyncHttpx2Backend(client_factory=httpx2.AsyncClient)
+    AsyncHttpx2Backend(client_factory=lambda: httpx2.AsyncClient(http2=False))
+
+    # the other library's clients are type errors, in both directions
+    Httpx2Backend(httpx.Client())  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+    HttpxBackend(httpx2.Client())  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+    AsyncHttpx2Backend(httpx.AsyncClient())  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+    AsyncHttpx2Backend(client_factory=httpx.AsyncClient)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+
+
+async def check_httpx_family_async_clients() -> None:
+    """The async backends hand out their library's async client."""
+    assert_type(await AsyncHttpxBackend().current_client(), httpx.AsyncClient)
+    assert_type(await AsyncHttpx2Backend().current_client(), httpx2.AsyncClient)
+    async with AsyncHttpx2Backend() as backend:
+        assert_type(backend, AsyncHttpx2Backend)
+    with Httpx2Backend() as sync_backend:
+        assert_type(sync_backend, Httpx2Backend)
+
+
+def check_httpx2_backends_resolve_the_client_overloads(request: Request) -> None:
+    """The httpx2 backends type like the httpx ones in both clients."""
+    assert_type(Client(Httpx2Backend()).send(request), Response)
+    sync_client = APIClient(Httpx2Backend(), "https://api.example.com")
+    assert_type(sync_client.send(GetItem(item_id=1)), Item)
+    assert_type(sync_client.backend, Httpx2Backend)
+    async_client = APIClient(AsyncHttpx2Backend(), "https://api.example.com")
+    assert_type(async_client.send(GetItem(item_id=1)), Awaitable[Item])
+    assert_type(async_client.backend, AsyncHttpx2Backend)
 
 
 def check_client_custom_wrapper(request: Request) -> None:

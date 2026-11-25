@@ -27,6 +27,7 @@ used:
 ```python
 from action0.client.backends.requests import RequestsBackend
 from action0.client.backends.httpx import HttpxBackend, AsyncHttpxBackend
+from action0.client.backends.httpx2 import Httpx2Backend, AsyncHttpx2Backend
 from action0.client.backends.aiohttp import AiohttpBackend
 from action0.client.backends.twisted import TwistedBackend
 from action0.client.backends.urllib import UrllibBackend
@@ -133,6 +134,13 @@ from action0.client.testing import StubBackend, AsyncStubBackend, DeferredStubBa
 ```{eval-rst}
 .. automodule:: action0.client.backends.httpx
    :members:
+   :inherited-members:
+```
+
+```{eval-rst}
+.. automodule:: action0.client.backends.httpx2
+   :members:
+   :inherited-members:
 ```
 
 ```{eval-rst}

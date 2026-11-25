@@ -34,6 +34,8 @@ from action0.client.backends.aiohttp import AiohttpBackend
 from action0.client.backends.futures import ThreadPoolBackend
 from action0.client.backends.httpx import AsyncHttpxBackend
 from action0.client.backends.httpx import HttpxBackend
+from action0.client.backends.httpx2 import AsyncHttpx2Backend
+from action0.client.backends.httpx2 import Httpx2Backend
 from action0.client.backends.requests import RequestsBackend
 from action0.client.backends.urllib import UrllibBackend
 from action0.client.backends.urllib3 import Urllib3Backend
@@ -650,6 +652,17 @@ class HttpxBodyModesTestCase(SyncBodyModes):
         return backend.send
 
 
+class Httpx2BodyModesTestCase(SyncBodyModes):
+    """the body modes on :py:class:`~action0.client.backends.httpx2.Httpx2Backend`"""
+
+    __test__ = True
+
+    def open_backend(self, **kwargs: Any) -> Callable[[Request], Response]:
+        backend = Httpx2Backend(**kwargs)
+        self.addCleanup(backend.close)
+        return backend.send
+
+
 class ThreadPoolBodyModesTestCase(SyncBodyModes):
     """
     the body modes through
@@ -673,6 +686,17 @@ class AsyncHttpxBodyModesTestCase(AsyncBodyModes):
 
     def open_backend(self, **kwargs: Any) -> Callable[[Request], Awaitable[Response]]:
         backend = AsyncHttpxBackend(**kwargs)
+        self.addAsyncCleanup(backend.aclose)
+        return backend.send
+
+
+class AsyncHttpx2BodyModesTestCase(AsyncBodyModes):
+    """the body modes on :py:class:`~action0.client.backends.httpx2.AsyncHttpx2Backend`"""
+
+    __test__ = True
+
+    def open_backend(self, **kwargs: Any) -> Callable[[Request], Awaitable[Response]]:
+        backend = AsyncHttpx2Backend(**kwargs)
         self.addAsyncCleanup(backend.aclose)
         return backend.send
 

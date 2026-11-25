@@ -6,7 +6,7 @@ pick the extras matching the backend(s) you want:
 ```shell
 uv add "action0-client[httpx]"
 
-# extras: requests, httpx, aiohttp, urllib3, twisted, all
+# extras: requests, httpx, httpx2, aiohttp, urllib3, twisted, all
 pip install "action0-client[requests,twisted]"
 ```
 

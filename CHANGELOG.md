@@ -8,6 +8,21 @@ numbers follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `Httpx2Backend` and `AsyncHttpx2Backend` in
+  `action0.client.backends.httpx2`, behind the new `httpx2` extra (also
+  part of `all`): the httpx backends for the httpx2 fork, with the same
+  options and behaviour. They share one implementation with the httpx
+  backends, are precisely typed for `httpx2.Client` /
+  `httpx2.AsyncClient`, and work with and without
+  `httpx2.alias_httpx()`. Note that httpx2 verifies TLS against the
+  operating system's trust store rather than certifi.
+- Async backends can be shared between event loops: created without a
+  client, `AsyncHttpxBackend`, `AsyncHttpx2Backend` and `AiohttpBackend`
+  keep one client per running loop, closed when the loop shuts down.
+  `client_factory=` (httpx, httpx2) and `session_factory=` (aiohttp)
+  configure those clients.
+- `HttpxBackend.client`, `AsyncHttpxBackend.current_client()` and
+  `AiohttpBackend.current_session()` (and the httpx2 counterparts).
 - Response body handling is chosen per request with
   `RequestOptions(body=BodyMode.PRELOAD | STREAM | SPOOL)`, or once per
   operation via `Operation.request_options`. `SPOOL` writes the body
@@ -61,6 +76,18 @@ numbers follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `AsyncHttpxBackend` and `AiohttpBackend` without a passed-in client
+  create their client per event loop on first use. Before,
+  `AsyncHttpxBackend` created one client in its constructor, and both
+  backends failed with "Event loop is closed" on a second
+  `asyncio.run()`. `aclose()` now closes the client of the loop it is
+  called in.
+- A single client passed to an async backend is bound to the loop of
+  its first use. A use from another loop raises a `RuntimeError` that
+  names the fix instead of the HTTP library's internal error.
+- A client of the other library of the httpx family
+  (`httpx2.Client` given to `HttpxBackend`, or the reverse) is refused
+  with a `TypeError`.
 - `JsonOperation.load` raises `PayloadError` instead of a plain
   `APIError` for an empty or malformed body. `PayloadError` is an
   `APIError`, so existing handlers keep working.

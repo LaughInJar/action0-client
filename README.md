@@ -30,9 +30,10 @@ deferred = client.send(GetItem(item_id=42))  # Deferred[Item]
 (`GetItem` is an ordinary typed operation class, written once — see
 [Usage](#usage) for its definition.)
 
-Eight backends are included —
+Ten backends are included —
 [requests](https://requests.readthedocs.io/),
-[httpx](https://www.python-httpx.org/) (sync and async),
+[httpx](https://www.python-httpx.org/) and its fork
+[httpx2](https://pypi.org/project/httpx2/) (sync and async each),
 [aiohttp](https://docs.aiohttp.org/),
 [urllib3](https://urllib3.readthedocs.io/) and
 [Twisted](https://twisted.org/), each behind an optional extra, plus
@@ -57,7 +58,7 @@ Full documentation including the API reference:
 <https://laughinjar.github.io/action0-client/>
 
 **Status:** the core API is complete — the backend protocol with the
-eight backend implementations and instrumentation hooks, the raw
+ten backend implementations and instrumentation hooks, the raw
 `Client`, the typed `Operation`/`JsonOperation`/`APIClient` layer, and the
 stub backends for testing. Changes per release are listed in the
 [changelog](CHANGELOG.md), planned work in [TODO.md](TODO.md).
@@ -211,7 +212,7 @@ public [PokéAPI](https://pokeapi.co).
 
 Install from [PyPI](https://pypi.org/project/action0-client/). The HTTP
 libraries are optional extras — pick what you need (`requests`, `httpx`,
-`aiohttp`, `urllib3`, `twisted`, `all`); the stdlib `urllib` and thread-pool backends
+`httpx2`, `aiohttp`, `urllib3`, `twisted`, `all`); the stdlib `urllib` and thread-pool backends
 work without any extra:
 
 ```shell
