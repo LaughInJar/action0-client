@@ -25,9 +25,10 @@ deferred = client.send(GetItem(item_id=42))  # Deferred[Item]
 (`GetItem` is an ordinary typed operation class, written once — the
 {doc}`guide <usage/operations>` shows its definition.)
 
-Eight backends are included —
+Ten backends are included —
 [requests](https://requests.readthedocs.io/),
-[httpx](https://www.python-httpx.org/) (sync and async),
+[httpx](https://www.python-httpx.org/) and its fork
+[httpx2](https://pypi.org/project/httpx2/) (sync and async each),
 [aiohttp](https://docs.aiohttp.org/),
 [urllib3](https://urllib3.readthedocs.io/) and
 [Twisted](https://twisted.org/), each behind an optional extra, plus
