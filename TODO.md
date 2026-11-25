@@ -6,8 +6,10 @@ Planned work that is not scheduled for a release yet. Entries move to the
 ## Streamed response bodies on the Twisted backend
 
 `TwistedBackend` reads every response body in full before the Deferred
-returned by `send` fires; unlike the other backends it cannot hand out
-the response at headers arrival and stream the body afterwards.
+returned by `send` fires — into memory, or into a spooled body. Unlike
+the other backends it cannot hand out the response at headers arrival
+and stream the body afterwards: a request asking for `BodyMode.STREAM`
+fails with a `ValueError`.
 
 What it takes:
 

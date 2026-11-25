@@ -13,18 +13,18 @@ import requests
 from action0.req import Request
 from action0.req import Response
 from action0.req.body import BodyTypes
-from action0.req.body import IterableBody
 
 from ..backend import BaseSyncBackend
 from ..errors import TimeoutError
 from ..errors import TransportError
 from ..hooks import Hook
+from ..options import BodyMode
+from ._body import CHUNK_SIZE
+from ._body import body_mode
+from ._body import deliver
 
 DEFAULT_TIMEOUT = 30.0
 """The default total number of seconds to wait for connect + read."""
-
-_CHUNK_SIZE = 65536
-"""The chunk size for streamed response bodies."""
 
 # requests reports the HTTP version of the response as a urllib3 int
 _HTTP_VERSIONS = {9: "HTTP/0.9", 10: "HTTP/1.0", 11: "HTTP/1.1", 20: "HTTP/2"}
@@ -49,11 +49,11 @@ class RequestsBackend(BaseSyncBackend):
     - Streaming request bodies work: a
       :py:class:`~action0.req.body.BodyProducer` body is handed to requests
       as a chunk iterator (sent with chunked transfer encoding).
-    - Streaming *response* bodies are opt-in: with ``stream=True`` the
-      response body is an :py:class:`~action0.req.body.IterableBody`
-      producing the bytes as they arrive instead of preloaded bytes; the
-      connection is held until the body is consumed (or the producer is
-      garbage-collected).
+    - The response body is preloaded bytes by default. A request asks for
+      a streamed or a spooled body with
+      :py:attr:`RequestOptions.body <action0.client.options.RequestOptions.body>`
+      (see :py:class:`~action0.client.options.BodyMode`); ``stream=True``
+      makes streaming this backend's default.
     - Multiple response header lines with the same name are preserved when
       urllib3's raw headers are available; requests itself would merge them.
     - Multiple *request* header lines with the same name are merged into
@@ -80,9 +80,11 @@ class RequestsBackend(BaseSyncBackend):
                         ``None`` waits forever
         :param follow_redirects: whether 3xx responses are followed
                                  (transparently, like a browser)
-        :param stream: whether response bodies arrive as streaming
-                       producers instead of preloaded bytes (``send``
-                       then returns at headers arrival)
+        :param stream: whether response bodies are streamed by default
+                       (``send`` then returns at headers arrival); a
+                       request's own
+                       :py:attr:`~action0.client.options.RequestOptions.body`
+                       option takes precedence
         :param hooks: the instrumentation hooks to run around every send
         """
         super().__init__(hooks)
@@ -108,13 +110,26 @@ class RequestsBackend(BaseSyncBackend):
                 data=_request_data(request),
             )
         )
+        mode = body_mode(request, self._stream)
         answer = self._session.send(
             prepared,
             timeout=self._timeout,
             allow_redirects=self._follow_redirects,
-            stream=self._stream,
+            stream=mode is not BodyMode.PRELOAD,
         )
-        body: BodyTypes = _streamed_body(answer) if self._stream else answer.content
+        body: BodyTypes
+        if mode is BodyMode.PRELOAD:
+            body = answer.content
+        else:
+            # requests' close is safe in every state: a fully read body
+            # was already released to the pool, a partial one is dropped
+            body = deliver(
+                request,
+                mode,
+                answer.iter_content(CHUNK_SIZE),
+                answer.close,
+                self.translate_error,
+            )
         return Response(
             answer.status_code,
             headers=_response_headers(answer),
@@ -197,28 +212,6 @@ def _request_data(request: Request) -> "bytes | Iterator[bytes] | None":
     if isinstance(request.body, (bytes, str)):
         return request.body_bytes()
     return request.body.chunks()
-
-
-def _streamed_body(answer: requests.Response) -> IterableBody:
-    """
-    The response body as a streaming producer: chunks are read from the
-    open connection on demand. Consuming the body to the end releases the
-    connection back into the session's pool; abandoning it mid-way closes
-    the connection when the producer is garbage-collected.
-
-    :param answer: the requests response (sent with ``stream=True``)
-    :return: the body producer
-    """
-
-    def chunks() -> Iterator[bytes]:
-        try:
-            yield from answer.iter_content(_CHUNK_SIZE)
-        finally:
-            # requests' close is safe in every state: a fully read body
-            # was already released to the pool, a partial one is dropped
-            answer.close()
-
-    return IterableBody(chunks())
 
 
 def _response_headers(answer: requests.Response) -> list[tuple[str, str]]:

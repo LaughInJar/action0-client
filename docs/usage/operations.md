@@ -218,6 +218,10 @@ print(request.meta)
 # {'action0-client': RequestOptions(retry_safe=True)}
 ```
 
+Besides `retry_safe` the options choose how the response body is handed
+over — preloaded, streamed or spooled to a temporary file; see
+{doc}`streaming`.
+
 The options travel in `request.meta` under the one key `action0-client`,
 so they are never sent on the wire. Backends and wrappers read them with
 `RequestOptions.of(request)`. Every option defaults to `None`, meaning

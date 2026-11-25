@@ -148,6 +148,36 @@ Transport problems surface uniformly as `TransportError`/`TimeoutError`,
 API-level problems (unexpected status, malformed payload) as `APIError` —
 regardless of the HTTP library underneath.
 
+### Large response bodies
+
+Each request chooses how its response body is handed over: preloaded
+bytes (the default), a stream that gives you status and headers before
+the body, or a spool — the body is written to a temporary file while it
+arrives (in memory up to a threshold) and offers a seekable file object
+afterwards. Async backends never block the event loop on those writes.
+
+```python
+from action0.client import BodyMode, RequestOptions
+
+
+class DownloadReport(Operation[IO[bytes]]):
+    path = "/reports/{name}.json.gz"
+    request_options = RequestOptions(body=BodyMode.SPOOL)
+
+    name: str = path_param()
+
+    def load(self, response: Response) -> IO[bytes]:
+        return response.body_file()  # seekable; closing it removes the temp file
+
+
+with client.send(DownloadReport(name="daily")) as file:
+    rows = json.load(gzip.GzipFile(fileobj=file))
+```
+
+Streamed bodies are saved with `response.save_body(path, append=True)`,
+which makes HTTP Range-resumable downloads a short loop — see the
+[guide](https://laughinjar.github.io/action0-client/usage/streaming.html).
+
 ### Instrumentation and testing
 
 Backends run `Hook`s (logging, metrics, tracing, request decoration)

@@ -19,13 +19,16 @@ import httpx
 import trio
 
 from action0.client import APIClient
+from action0.client import BodyMode
 from action0.client import Client
 from action0.client import JsonOperation
+from action0.client import RequestOptions
 from action0.client import query
 from action0.client.backends.httpx import AsyncHttpxBackend
 from action0.client.testing import AsyncStubBackend
 from action0.req import Request
 from action0.req import Response
+from action0.req import SpooledBody
 
 
 class Ping(JsonOperation[Any]):
@@ -135,3 +138,29 @@ class TrioHttpxTestCase(unittest.TestCase):
                 return await client.send(Ping(q="x"))
 
         self.assertEqual(trio.run(main), {"path": "/ping?q=x"})
+
+    def test_spooled_body_under_trio(self) -> None:
+        """
+        Test that a body spooled to a temporary file works on a trio
+        loop: the file writes and reads go through trio's thread pool
+        (asyncio's is not available there).
+        """
+        payload = bytes(range(256)) * 1024
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=payload)
+
+        async def main() -> "tuple[bool, bytes]":
+            transport = httpx.MockTransport(handler)
+            async with AsyncHttpxBackend(httpx.AsyncClient(transport=transport)) as backend:
+                request = Request("https://api.example.com/feed")
+                RequestOptions(body=BodyMode.SPOOL, spool_max_memory=1024).apply(request)
+                async with await backend.send(request) as response:
+                    body = response.body
+                    assert isinstance(body, SpooledBody)
+                    chunks = [chunk async for chunk in body.achunks()]
+                    return body.rolled, b"".join(chunks)
+
+        rolled, received = trio.run(main)
+        self.assertTrue(rolled)
+        self.assertEqual(received, payload)
