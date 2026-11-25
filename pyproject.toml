@@ -59,6 +59,14 @@ Documentation = "https://laughinjar.github.io/action0-client/"
 Source = "https://github.com/LaughInJar/action0-client"
 Issues = "https://github.com/LaughInJar/action0-client/issues"
 
+# TEMPORARY, until action0-req 0.2.0 is on PyPI: this branch needs
+# SpooledBody and Response.close(), which are merged there but not
+# released. Remove this table and raise the lower bound above to
+# "action0-req>=0.2.0" in the release PR — PyPI rejects a wheel whose
+# requirements carry a direct git URL.
+[tool.uv.sources]
+action0-req = { git = "https://github.com/LaughInJar/action0-req", branch = "main" }
+
 [dependency-groups]
 dev = [
     # all optional backend libraries are dev dependencies: the tests and the

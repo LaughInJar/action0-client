@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -79,7 +79,7 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "action0-req", specifier = ">=0.1.1" },
+    { name = "action0-req", git = "https://github.com/LaughInJar/action0-req?branch=main" },
     { name = "action0-url", specifier = ">=0.1.0" },
     { name = "aiohttp", marker = "extra == 'aiohttp'", specifier = ">=3.9" },
     { name = "aiohttp", marker = "extra == 'all'", specifier = ">=3.9" },
@@ -121,13 +121,9 @@ docs = [
 [[package]]
 name = "action0-req"
 version = "0.1.1"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/LaughInJar/action0-req?branch=main#2412fe651aa04bb01503834255b265b86bbc9fe0" }
 dependencies = [
     { name = "action0-url" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/70/38/9eac4904eaadd376f4366e16a015ae7815c5c3b4b47e0941422fb4ce3dc5/action0_req-0.1.1.tar.gz", hash = "sha256:d04fa61e5ae9de6efad5ea4bd66031ab51c956eb324a528e88827fee66403d44", size = 98143, upload-time = "2026-08-08T06:47:18.501Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/ac/0c/31a51d4841103e1f69ecd608e7f7c6e5ea2f04f27ee7d9c1af36ed596805/action0_req-0.1.1-py3-none-any.whl", hash = "sha256:cf911fb26a895c9ec75cf849d08ca5a7b308c3cdb7b48400264a87ddcfb03b93", size = 25540, upload-time = "2026-08-08T06:47:17.436Z" },
 ]
 
 [[package]]
