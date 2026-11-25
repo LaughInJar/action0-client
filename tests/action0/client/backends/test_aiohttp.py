@@ -214,10 +214,10 @@ class AiohttpBackendTestCase(unittest.IsolatedAsyncioTestCase):
 
         owned = AiohttpBackend()
         await owned.send(Request(f"{self.base_url}/"))
-        inner = owned._session
-        assert inner is not None
+        inner = await owned.current_session()
         await owned.aclose()
         self.assertTrue(inner.closed)
+        await owned.aclose()  # nothing left to close: a no-op
 
     async def test_api_client_integration(self) -> None:
         """

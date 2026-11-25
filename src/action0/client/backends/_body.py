@@ -14,6 +14,7 @@ from typing import Iterable
 from typing import Iterator
 
 from action0.req import Request
+from action0.req import Response
 from action0.req.body import AsyncIterableBody
 from action0.req.body import BodyTypes
 from action0.req.body import IterableBody
@@ -153,6 +154,78 @@ async def adeliver(
     finally:
         await aclose()
     return spool
+
+
+def deliver_bytes(
+    request: Request, response: Response, mode: "BodyMode | None" = None
+) -> "BodyTypes | None":
+    """
+    The body of a response that is already in memory — a cached or a
+    canned one — in the mode the request asked for, so that code written
+    against a streamed or spooled body gets what it expects whether or
+    not the network was involved.
+
+    Without a body option (or with ``PRELOAD``) the body is returned as
+    it is. For ``STREAM`` it becomes a single-use
+    :py:class:`~action0.req.body.IterableBody`, for ``SPOOL`` a filled
+    :py:class:`~action0.req.body.SpooledBody` — empty ones if there is
+    no body. A body that is a producer already is left alone.
+
+    :param request: the request being answered
+    :param response: the response whose in-memory body to hand out
+    :param mode: the mode to use; ``None`` takes the request's own
+                 option (and preloads if it has none)
+    :return: the body in the requested form
+    """
+    if mode is None:
+        mode = RequestOptions.of(request).body
+    if mode is None or mode is BodyMode.PRELOAD or not _in_memory(response.body):
+        return response.body
+    data = response.body_bytes() or b""
+    if mode is BodyMode.STREAM:
+        return IterableBody(iter([data] if data else []))
+    spool = new_spool(request)
+    spool.write(data)
+    return spool
+
+
+async def adeliver_bytes(
+    request: Request, response: Response, mode: "BodyMode | None" = None
+) -> "BodyTypes | None":
+    """
+    :py:func:`deliver_bytes` for async backends: a streamed body is an
+    :py:class:`~action0.req.body.AsyncIterableBody`, and a spool is
+    filled with ``awrite()``.
+
+    :param request: the request being answered
+    :param response: the response whose in-memory body to hand out
+    :param mode: the mode to use; ``None`` takes the request's own
+                 option (and preloads if it has none)
+    :return: the body in the requested form
+    """
+    if mode is None:
+        mode = RequestOptions.of(request).body
+    if mode is None or mode is BodyMode.PRELOAD or not _in_memory(response.body):
+        return response.body
+    data = response.body_bytes() or b""
+    if mode is BodyMode.STREAM:
+
+        async def chunks() -> AsyncIterator[bytes]:
+            if data:
+                yield data
+
+        return AsyncIterableBody(chunks())
+    spool = new_spool(request)
+    await spool.awrite(data)
+    return spool
+
+
+def _in_memory(body: "BodyTypes | None") -> bool:
+    """
+    :param body: a response body
+    :return: whether it is absent or plain bytes/str (not a producer)
+    """
+    return body is None or isinstance(body, (bytes, str))
 
 
 def _translated(

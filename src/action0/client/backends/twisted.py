@@ -400,11 +400,7 @@ class TwistedBackend(BaseDeferredBackend):
         """
         mode = body_mode(request, False)
         if mode is BodyMode.STREAM:
-            raise ValueError(
-                "TwistedBackend cannot stream response bodies: ask for BodyMode.SPOOL"
-                " (the body is written to a temporary file while it arrives) or"
-                " BodyMode.PRELOAD"
-            )
+            self._refuse_stream()
         body = request.body_producer()
         producer = _RequestBodyProducer(body) if body is not None else None
         deferred = self._agent.request(
@@ -420,6 +416,21 @@ class TwistedBackend(BaseDeferredBackend):
         if self._timeout is not None:
             result.addTimeout(self._timeout, self._clock)
         return result
+
+    #: read by the mock router, so that a mocked send refuses a streamed
+    #: body exactly like a real one
+    _can_stream = False
+
+    @staticmethod
+    def _refuse_stream() -> None:
+        """
+        :raises ValueError: always — this backend has no streamed mode
+        """
+        raise ValueError(
+            "TwistedBackend cannot stream response bodies: ask for BodyMode.SPOOL"
+            " (the body is written to a temporary file while it arrives) or"
+            " BodyMode.PRELOAD"
+        )
 
     def _read_body(self, answer: Any, request: Request, mode: BodyMode) -> Deferred[Response]:
         """

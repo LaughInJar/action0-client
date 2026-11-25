@@ -71,6 +71,100 @@ print(len(inner.requests))  # the POST was sent twice
 being retried although its method would allow it. The attempt budget
 and the list of retryable statuses and errors still apply either way.
 
+## Retrying responses that cannot be parsed
+
+A status check does not catch everything: a gateway that answers `200`
+with an HTML page, or a JSON document that is cut off. By default such a
+response fails the operation's `parse()` and the error is raised — it is
+not retried, because the retrying backend only looks at the status.
+
+Name the errors worth another attempt in the policy and the retry covers
+the whole send-and-parse cycle:
+
+```python
+from typing import Any
+
+from action0.client import APIClient
+from action0.client import JsonOperation
+from action0.client import PayloadError
+from action0.client import RetryingSyncBackend
+from action0.client import RetryPolicy
+from action0.client.testing import StubBackend
+from action0.req import Response
+
+
+class GetRates(JsonOperation[Any]):
+    path = "/rates"
+
+
+inner = StubBackend(
+    Response(200, body="<html>Service temporarily busy</html>"),
+    Response(200, body='{"eur": 1.1'),  # cut off
+    Response(200, body='{"eur": 1.1}'),
+)
+policy = RetryPolicy(attempts=3, backoff=0, retry_parse_errors=(PayloadError,))
+client = APIClient(RetryingSyncBackend(inner, policy), "https://api.example.com")
+print(client.send(GetRates()))
+# {'eur': 1.1}
+print(len(inner.requests))
+# 3
+```
+
+{py:class}`~action0.client.errors.PayloadError` is what
+{py:class}`~action0.client.operation.JsonOperation` raises for an empty
+or malformed body. It is a subclass of `APIError`, but naming it does
+not retry unexpected statuses — a 404 stays a plain `APIError` and is
+raised at once. For failures of your own `load()` / `load_json()` name
+the exception types they raise (`KeyError`, a validation error, ...).
+
+How this fits together:
+
+- There is one attempt counter. Transport errors, transient statuses and
+  parse failures all draw on `attempts`; three attempts are at most
+  three requests, whatever went wrong in between.
+- The method gate applies as for every retry: a `POST` is only sent
+  again if the policy allows it or the operation declares
+  `retry_safe=True`.
+- Each response is parsed once. The retrying backend and the client
+  share the result.
+- When the attempts run out, the last response is handed on unchanged:
+  for a transient status `Operation.check` raises the `APIError` with
+  that response attached, for an unparseable body the parse error of the
+  last response is raised.
+- A response that is thrown away is closed first, so a streamed or
+  spooled body releases its connection or temporary file right away.
+- This works in every execution model, also through
+  {py:class}`~action0.client.backends.futures.ThreadPoolBackend`. It
+  needs an {py:class}`~action0.client.api.APIClient`: a request sent
+  through the raw `Client` has no parse step.
+
+A {doc}`caching backend <caching>` uses the same knowledge: a response
+the operation cannot parse is never stored.
+
+## Retries never multiply
+
+If retrying backends are stacked — say one configured by a library and
+one added by the application — only the outermost one retries; the
+inner ones pass its attempts through. Two default policies therefore
+mean 3 requests, not 9, and the outermost policy is the one that
+applies.
+
+The HTTP libraries' own retry features are a different matter:
+{py:class}`~action0.client.backends.urllib3.Urllib3Backend` passes
+`retries=` on to urllib3, whose default retries a failed connection a
+few times by itself — under a retrying backend each of *its* attempts
+then includes urllib3's. Pass `retries=False` to leave retrying to one
+place:
+
+```python
+backend = RetryingSyncBackend(Urllib3Backend(retries=False), RetryPolicy(attempts=3))
+```
+
+The same goes for a `requests` session with a retrying adapter or an
+`httpx` transport created with `retries=`.
+
+## Backoff
+
 How long is waited is also the policy's call: exponential backoff with
 "full jitter" — each wait is a uniformly random duration up to the
 exponential delay, so a fleet of clients hitting the same outage does

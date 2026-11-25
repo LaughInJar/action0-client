@@ -30,9 +30,10 @@ deferred = client.send(GetItem(item_id=42))  # Deferred[Item]
 (`GetItem` is an ordinary typed operation class, written once — see
 [Usage](#usage) for its definition.)
 
-Eight backends are included —
+Ten backends are included —
 [requests](https://requests.readthedocs.io/),
-[httpx](https://www.python-httpx.org/) (sync and async),
+[httpx](https://www.python-httpx.org/) and its fork
+[httpx2](https://pypi.org/project/httpx2/) (sync and async each),
 [aiohttp](https://docs.aiohttp.org/),
 [urllib3](https://urllib3.readthedocs.io/) and
 [Twisted](https://twisted.org/), each behind an optional extra, plus
@@ -57,7 +58,7 @@ Full documentation including the API reference:
 <https://laughinjar.github.io/action0-client/>
 
 **Status:** the core API is complete — the backend protocol with the
-eight backend implementations and instrumentation hooks, the raw
+ten backend implementations and instrumentation hooks, the raw
 `Client`, the typed `Operation`/`JsonOperation`/`APIClient` layer, and the
 stub backends for testing. Changes per release are listed in the
 [changelog](CHANGELOG.md), planned work in [TODO.md](TODO.md).
@@ -186,9 +187,27 @@ responses with timings. What a hook cannot do — await a rate limiter
 before each request, send again, skip the send — is a few lines with the
 wrapper base classes (`SyncBackendWrapper`, `AsyncBackendWrapper`,
 `DeferredBackendWrapper`), which the bundled retry and caching backends
-are built on. `action0.client.testing` ships recording stub
-backends for all three execution models, so API clients are testable
-without a server:
+are built on.
+
+`action0.client.testing` makes API clients testable without a server —
+and without the tests knowing which backend the application uses. A
+`MockRouter` (or the `action0_mock` pytest fixture) answers the requests
+of every backend in the process, with a route API modelled on respx:
+
+```python
+from action0.client.testing import MockRouter
+
+with MockRouter() as mock:
+    route = mock.get("https://api.example.com/v1/items/{item_id}").respond(
+        json={"id": 42, "name": "Thing"}
+    )
+    assert fetch_item(42) == Item(id=42, name="Thing")  # application code, any backend
+assert route.calls.last.request.url.path == "/v1/items/42"
+```
+
+A request no route matches fails the test instead of reaching the
+network. For tests that inject the backend there are recording stub
+backends for all three execution models:
 
 ```python
 from action0.client.testing import StubBackend
@@ -211,7 +230,7 @@ public [PokéAPI](https://pokeapi.co).
 
 Install from [PyPI](https://pypi.org/project/action0-client/). The HTTP
 libraries are optional extras — pick what you need (`requests`, `httpx`,
-`aiohttp`, `urllib3`, `twisted`, `all`); the stdlib `urllib` and thread-pool backends
+`httpx2`, `aiohttp`, `urllib3`, `twisted`, `all`); the stdlib `urllib` and thread-pool backends
 work without any extra:
 
 ```shell

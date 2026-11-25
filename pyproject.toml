@@ -39,6 +39,11 @@ requests = [
 httpx = [
     "httpx>=0.27",
 ]
+httpx2 = [
+    # the lower bound is deliberately an older release, so that consumers
+    # enforcing a minimum package age can install it
+    "httpx2>=2.16.0",
+]
 aiohttp = [
     "aiohttp>=3.9",
 ]
@@ -50,8 +55,13 @@ twisted = [
     "twisted[tls]>=24.7",
 ]
 all = [
-    "action0-client[requests,httpx,aiohttp,urllib3,twisted]",
+    "action0-client[requests,httpx,httpx2,aiohttp,urllib3,twisted]",
 ]
+
+# the action0_mock fixture; loading the plugin needs pytest, which is
+# why only pytest ever imports that module
+[project.entry-points.pytest11]
+action0-client = "action0.client.testing.pytest_plugin"
 
 [project.urls]
 Homepage = "https://github.com/LaughInJar/action0-client"
@@ -73,6 +83,7 @@ dev = [
     # type checkers need them
     "aiohttp>=3.9",
     "httpx>=0.27",
+    "httpx2>=2.16.0",
     "ipython>=8.39.0",
     "mypy>=2.3.0",
     "pyright>=1.1.411",

@@ -76,6 +76,17 @@ if TYPE_CHECKING:
     from twisted.internet.defer import Deferred
     from twisted.python.failure import Failure
 
+_mock: Any = None
+"""The mock router answering requests in place of the network, or ``None``
+— which it always is outside of tests.
+
+Set and cleared ONLY by :py:class:`action0.client.testing.MockRouter`
+while one is active (as a context manager or through the pytest
+fixture). No environment variable, setting or import turns it on: mocking
+has to be asked for explicitly, in test code. The ``send`` of each base
+class reads it once per request — one module-global load and an
+``is None`` test, a few nanoseconds."""
+
 T = TypeVar("T")
 S = TypeVar("S")
 
@@ -288,8 +299,12 @@ class BaseSyncBackend(_BaseBackend, ABC):
         """
         request = self._run_request_hooks(request)
         started = time.monotonic()
+        mock = _mock
         try:
-            response = self._send(request)
+            if mock is None:
+                response = self._send(request)
+            else:
+                response = mock._dispatch_sync(self, request)
         except Exception as error:
             translated = self.translate_error(error, request)
             self._run_error_hooks(request, translated, time.monotonic() - started)
@@ -365,8 +380,12 @@ class BaseAsyncBackend(_BaseBackend, ABC):
         """
         request = self._run_request_hooks(request)
         started = time.monotonic()
+        mock = _mock
         try:
-            response = await self._send(request)
+            if mock is None:
+                response = await self._send(request)
+            else:
+                response = await mock._dispatch_async(self, request)
         except Exception as error:
             translated = self.translate_error(error, request)
             self._run_error_hooks(request, translated, time.monotonic() - started)
@@ -462,8 +481,12 @@ class BaseDeferredBackend(_BaseBackend, ABC):
             translated.__cause__ = error
             return Failure(translated)  # type: ignore[no-untyped-call]
 
+        mock = _mock
         try:
-            result = self._send(request)
+            if mock is None:
+                result = self._send(request)
+            else:
+                result = mock._dispatch_deferred(self, request)
         except Exception as error:
             # initiating the request failed synchronously — deliver the
             # (translated) error through the Deferred like any other failure

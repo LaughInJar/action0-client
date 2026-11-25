@@ -95,6 +95,28 @@ class RequestOptions:
     forbids them for a request whose method would be retried. ``None``
     leaves the decision to the policy's method gate."""
 
+    cacheable: "bool | None" = None
+    """Whether a caching backend may answer this request from its cache
+    and store the response. ``True`` makes a request cacheable although
+    its method is not in the policy's
+    :py:attr:`~action0.client.caching.CachePolicy.methods` — for a
+    ``POST`` that only reads; its body then becomes part of the cache
+    key. ``False`` keeps a request out of the cache. ``None`` leaves the
+    decision to the policy's method gate."""
+
+    cache_key: "str | None" = None
+    """The cache key for this request, used as given instead of the one
+    the policy computes from method, URL, vary headers and body. For
+    requests the computed key does not fit — because something volatile
+    is part of the URL or body, or because the body is a stream that
+    cannot be hashed. Whoever sets it is responsible for it telling
+    apart everything that changes the response."""
+
+    cache_ttl: "float | None" = None
+    """How many seconds the response to this request may be served from
+    the cache; ``None`` uses the policy's
+    :py:attr:`~action0.client.caching.CachePolicy.ttl`."""
+
     def __post_init__(self) -> None:
         """
         :raises ValueError: if ``spool_max_memory`` is negative

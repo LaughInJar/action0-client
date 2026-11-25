@@ -299,9 +299,16 @@ read raises `RuntimeError`.
 
 ## Testing streaming consumers
 
-The {doc}`stub backends <testing>` need no special support: a canned
-{py:class}`~action0.req.Response` carries a streamed body by wrapping
-the chunks in an {py:class}`~action0.req.body.IterableBody` (or an
+The {doc}`mock router and the stub backends <testing>` deliver a mocked
+response in the body mode the request asks for — bytes, a stream or a
+spool — so code written against a streamed or spooled body is tested
+as it runs. A route answering with `chunks=[...]` controls the pieces
+a streamed body arrives in, and an exception among them breaks the body
+off midway, for testing code that resumes downloads.
+
+A canned {py:class}`~action0.req.Response` can also carry a body
+producer of its own, which is then handed out as it is — chunks wrapped
+in an {py:class}`~action0.req.body.IterableBody` (or an
 {py:class}`~action0.req.body.AsyncIterableBody` for async consumers):
 
 ```python
