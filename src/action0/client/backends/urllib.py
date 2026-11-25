@@ -19,19 +19,19 @@ from typing import Iterator
 from action0.req import Request
 from action0.req import Response
 from action0.req.body import BodyTypes
-from action0.req.body import IterableBody
 
 from ..backend import BaseSyncBackend
 from ..errors import TimeoutError
 from ..errors import TransportError
 from ..hooks import Hook
+from ..options import BodyMode
+from ._body import CHUNK_SIZE
+from ._body import body_mode
+from ._body import deliver
 
 DEFAULT_TIMEOUT = 30.0
 """The default number of seconds to wait for the connection and each
 socket operation."""
-
-_CHUNK_SIZE = 65536
-"""The chunk size for streamed response bodies."""
 
 # http.client reports the HTTP version of the response as an int
 _HTTP_VERSIONS = {9: "HTTP/0.9", 10: "HTTP/1.0", 11: "HTTP/1.1"}
@@ -72,11 +72,11 @@ class UrllibBackend(BaseSyncBackend):
     - Streaming request bodies work: a
       :py:class:`~action0.req.body.BodyProducer` body is handed to urllib
       as a chunk iterator (sent with chunked transfer encoding).
-    - Streaming *response* bodies are opt-in: with ``stream=True`` the
-      response body is an :py:class:`~action0.req.body.IterableBody`
-      producing the bytes as they arrive instead of preloaded bytes; the
-      connection is held until the body is consumed (or the producer is
-      garbage-collected).
+    - The response body is preloaded bytes by default. A request asks for
+      a streamed or a spooled body with
+      :py:attr:`RequestOptions.body <action0.client.options.RequestOptions.body>`
+      (see :py:class:`~action0.client.options.BodyMode`); ``stream=True``
+      makes streaming this backend's default.
     - Multiple response header lines with the same name are preserved.
     - Multiple *request* header lines are merged into one comma-separated
       line, and urllib normalizes request header casing (``X-Api-key``
@@ -100,9 +100,11 @@ class UrllibBackend(BaseSyncBackend):
         :param timeout: the seconds to wait for the connection and each
                         socket operation; ``None`` waits forever
         :param follow_redirects: whether 3xx responses are followed
-        :param stream: whether response bodies arrive as streaming
-                       producers instead of preloaded bytes (``send``
-                       then returns at headers arrival)
+        :param stream: whether response bodies are streamed by default
+                       (``send`` then returns at headers arrival); a
+                       request's own
+                       :py:attr:`~action0.client.options.RequestOptions.body`
+                       option takes precedence
         :param hooks: the instrumentation hooks to run around every send
         """
         super().__init__(hooks)
@@ -132,24 +134,28 @@ class UrllibBackend(BaseSyncBackend):
             answer = self._opener.open(raw, timeout=self._timeout)
         except urllib.error.HTTPError as error:
             answer = error
-        try:
-            status = answer.status
-            assert status is not None  # always set for HTTP responses
-            body: BodyTypes = _streamed_body(answer) if self._stream else answer.read()
-            return Response(
-                status,
-                # Message.items() keeps multiple lines per field intact
-                headers=answer.headers.items(),
-                body=body,
-                reason=answer.reason if isinstance(answer.reason, str) else None,
-                http_version=_HTTP_VERSIONS.get(getattr(answer, "version", 11), "HTTP/1.1"),
-                request=request,
-            )
-        finally:
-            # a preloaded response is done with its connection here; a
-            # streamed one keeps it until the body producer finishes
-            if not self._stream:
+        mode = body_mode(request, self._stream)
+        body: BodyTypes
+        if mode is BodyMode.PRELOAD:
+            try:
+                body = answer.read()
+            finally:
                 answer.close()
+        else:
+            # a streamed body keeps the connection until it is consumed
+            # or closed, a spooled one releases it before returning
+            body = deliver(request, mode, _chunks(answer), answer.close, self.translate_error)
+        status = answer.status
+        assert status is not None  # always set for HTTP responses
+        return Response(
+            status,
+            # Message.items() keeps multiple lines per field intact
+            headers=answer.headers.items(),
+            body=body,
+            reason=answer.reason if isinstance(answer.reason, str) else None,
+            http_version=_HTTP_VERSIONS.get(getattr(answer, "version", 11), "HTTP/1.1"),
+            request=request,
+        )
 
     def translate_error(self, error: Exception, request: Request) -> BaseException:
         """
@@ -200,26 +206,28 @@ class UrllibBackend(BaseSyncBackend):
         return f"{self.__class__.__name__}()"
 
 
-def _streamed_body(answer: Any) -> IterableBody:
+def _chunks(answer: Any) -> Iterator[bytes]:
     """
-    The response body as a streaming producer: chunks are read from the
-    open connection on demand, and the connection is closed once the body
-    is consumed (or the producer is garbage-collected).
+    The body of an open response, read from the connection chunk by
+    chunk.
 
     :param answer: the open urllib response (an ``addinfourl`` or an
-                   ``HTTPError`` — both read and close alike, and neither
-                   is precisely typed in typeshed, hence ``Any``)
-    :return: the body producer
+                   ``HTTPError`` — both read alike, and neither is
+                   precisely typed in typeshed, hence ``Any``)
+    :return: the chunk iterator
+    :raises http.client.IncompleteRead: if the connection ends before the
+                                        announced Content-Length arrived
     """
-
-    def chunks() -> Iterator[bytes]:
-        try:
-            while chunk := answer.read(_CHUNK_SIZE):
-                yield chunk
-        finally:
-            answer.close()
-
-    return IterableBody(chunks())
+    while chunk := answer.read(CHUNK_SIZE):
+        yield chunk
+    # http.client only checks the Content-Length when a body is read in
+    # one go; read(amount) just returns b"" when the peer hangs up early.
+    # Its countdown of the bytes still expected tells the two apart. (An
+    # HTTPError wraps the actual response as .fp.)
+    for source in (answer, getattr(answer, "fp", None)):
+        missing = getattr(source, "length", None)
+        if isinstance(missing, int) and missing > 0:
+            raise http.client.IncompleteRead(b"", missing)
 
 
 def _merged_headers(request: Request) -> dict[str, str]:

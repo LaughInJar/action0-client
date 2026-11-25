@@ -55,13 +55,15 @@ with RequestsBackend() as inner, ThreadPoolBackend(inner) as backend:
 Hooks belong on the *wrapped* backend (they run on the pool threads,
 around the actual I/O); the wrapper itself stays out of the way.
 
-## Streaming response bodies
+## Streamed and spooled response bodies
 
 By default every backend preloads the response body into memory. For
-large downloads (or endless feeds) most backends take `stream=True`:
-`send()` then returns as soon as the headers arrived, and the body is
-consumed chunk by chunk over the still-open connection. Streaming has
-{doc}`a page of its own <streaming>`.
+large downloads (or endless feeds) a request can ask for a streamed body
+— `send()` then returns as soon as the headers arrived, and the body is
+consumed chunk by chunk over the still-open connection — or for a
+spooled one, which is written to a temporary file while it arrives.
+`stream=True` on a backend makes streaming its default. The body modes
+have {doc}`a page of their own <streaming>`.
 
 ## Greenlet stacks (gevent, eventlet)
 

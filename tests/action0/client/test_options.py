@@ -1,6 +1,8 @@
 import dataclasses
 import unittest
+from typing import Any
 
+from action0.client import BodyMode
 from action0.client import RequestOptions
 from action0.req import Request
 
@@ -79,8 +81,11 @@ class RequestOptionsTestCase(unittest.TestCase):
         options = RequestOptions(retry_safe=True)
         with self.assertRaises(dataclasses.FrozenInstanceError):
             options.retry_safe = False  # type: ignore[misc]  # ty: ignore[invalid-assignment]
+        # Any: the call is wrong on purpose, and each checker words its
+        # complaint differently
+        untyped: Any = RequestOptions
         with self.assertRaises(TypeError):
-            RequestOptions(True)  # type: ignore[call-arg]  # ty: ignore[too-many-positional-arguments]
+            untyped(True)
 
     def test_repr_shows_what_is_decided(self) -> None:
         """
@@ -100,3 +105,32 @@ class RequestOptionsTestCase(unittest.TestCase):
         self.assertEqual(RequestOptions.of(request), RequestOptions())
         RequestOptions(retry_safe=True).apply(request)
         self.assertIs(RequestOptions.of(request).retry_safe, True)
+
+    def test_body_options_merge_independently(self) -> None:
+        """
+        Test that the body mode and its spool settings can come from
+        different places: each decided field survives the merge.
+        """
+        request = Request(URL)
+        RequestOptions(body=BodyMode.SPOOL, spool_max_memory=0).apply(request)
+        RequestOptions(spool_dir="/var/tmp", retry_safe=True).apply(request)
+        RequestOptions(body=BodyMode.STREAM).apply(request)
+
+        options = RequestOptions.of(request)
+        self.assertIs(options.body, BodyMode.STREAM)
+        self.assertEqual(options.spool_max_memory, 0)
+        self.assertEqual(options.spool_dir, "/var/tmp")
+        self.assertIs(options.retry_safe, True)
+        self.assertEqual(
+            repr(options),
+            "RequestOptions(body=<BodyMode.STREAM: 'stream'>, spool_max_memory=0,"
+            " spool_dir='/var/tmp', retry_safe=True)",
+        )
+
+    def test_negative_spool_memory_is_refused(self) -> None:
+        """
+        Test that a nonsensical threshold fails where it is written, not
+        on the first response.
+        """
+        with self.assertRaises(ValueError):
+            RequestOptions(spool_max_memory=-1)

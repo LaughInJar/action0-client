@@ -24,12 +24,41 @@ Example::
 """
 
 import dataclasses
+import os
 from dataclasses import dataclass
+from enum import Enum
 
 from action0.req import Request
 
 _META_KEY = "action0-client"
 """The ``request.meta`` key the options of a request are stored under."""
+
+
+class BodyMode(Enum):
+    """
+    How a backend hands over the body of a response — chosen per request
+    with :py:attr:`RequestOptions.body`.
+    """
+
+    PRELOAD = "preload"
+    """Read the whole body into memory before ``send`` returns; the
+    response body is ``bytes``. The connection is released by then. The
+    default of every backend."""
+
+    STREAM = "stream"
+    """Return from ``send`` as soon as the status and the headers are
+    there; the response body is a single-use producer
+    (:py:class:`~action0.req.body.IterableBody`, or
+    :py:class:`~action0.req.body.AsyncIterableBody` on async backends)
+    reading from the open connection on demand. The connection is held
+    until the body has been consumed or the response is closed."""
+
+    SPOOL = "spool"
+    """Write the body into a :py:class:`~action0.req.body.SpooledBody`
+    while it arrives — in memory up to a threshold, in a temporary file
+    beyond it — and release the connection before ``send`` returns. The
+    body is re-readable and offers a seekable file object; closing the
+    response removes the temporary file."""
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -44,6 +73,20 @@ class RequestOptions:
     requests it creates.
     """
 
+    body: "BodyMode | None" = None
+    """How the response body is handed over, see :py:class:`BodyMode`.
+    ``None`` uses the backend's default: preloaded bytes, or a stream for
+    a backend constructed with ``stream=True``."""
+
+    spool_max_memory: "int | None" = None
+    """For :py:attr:`BodyMode.SPOOL`: how many bytes of the body are kept
+    in memory before it is moved to a temporary file. ``0`` writes to the
+    file from the first byte on; ``None`` means 1 MiB."""
+
+    spool_dir: "str | os.PathLike[str] | None" = None
+    """For :py:attr:`BodyMode.SPOOL`: the directory for the temporary
+    file; ``None`` uses the system's (see :py:func:`tempfile.gettempdir`)."""
+
     retry_safe: "bool | None" = None
     """Whether this request may be sent again by a retrying backend.
     ``True`` allows retries although the method is not in the policy's
@@ -51,6 +94,13 @@ class RequestOptions:
     that only reads, like a search or translation endpoint. ``False``
     forbids them for a request whose method would be retried. ``None``
     leaves the decision to the policy's method gate."""
+
+    def __post_init__(self) -> None:
+        """
+        :raises ValueError: if ``spool_max_memory`` is negative
+        """
+        if self.spool_max_memory is not None and self.spool_max_memory < 0:
+            raise ValueError(f"spool_max_memory must not be negative, got {self.spool_max_memory}")
 
     def apply(self, request: Request) -> Request:
         """

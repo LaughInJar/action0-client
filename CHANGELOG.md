@@ -8,6 +8,19 @@ numbers follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Response body handling is chosen per request with
+  `RequestOptions(body=BodyMode.PRELOAD | STREAM | SPOOL)`, or once per
+  operation via `Operation.request_options`. `SPOOL` writes the body
+  into a `SpooledBody` while it arrives — in memory up to
+  `spool_max_memory` bytes (default 1 MiB), in a temporary file (in
+  `spool_dir`) beyond that — and releases the connection before `send`
+  returns. Supported by the requests, httpx, aiohttp, urllib3 and urllib
+  backends and through `ThreadPoolBackend`; the Twisted backend supports
+  `PRELOAD` and `SPOOL`.
+- Async backends never block the event loop while spooling: in-memory
+  writes run inline, file writes in a worker thread (asyncio or trio);
+  the Twisted backend uses the reactor's thread pool and pauses the
+  transport during a write.
 - `RequestOptions`: typed per-request options, stored in `request.meta`
   under the single key `action0-client`. Set them with
   `RequestOptions(...).apply(request)`, read them with
@@ -30,6 +43,27 @@ numbers follow [Semantic Versioning](https://semver.org/).
   see.
 
 ### Changed
+
+- An error while a streamed response body is read (a dropped
+  connection, a read timeout) is now raised as `TransportError` /
+  `TimeoutError` with the HTTP library's exception as `__cause__`.
+  Before, the library's own exception came through, so code handling
+  mid-body failures depended on the backend. Code that catches e.g.
+  `httpx.ReadError` or `requests.exceptions.ChunkedEncodingError` while
+  iterating a body has to catch `TransportError` instead.
+- Streamed bodies are closed deterministically: `response.close()`, a
+  `with` block or reading to the end releases the connection, also for a
+  body that was never read. Garbage collection remains the fallback.
+- The backends' `stream=True` argument is now the backend's default
+  body mode; a request's own `body` option takes precedence.
+- Requires the action0-req release that provides `SpooledBody` and
+  `Response.close()`.
+
+### Fixed
+
+- `UrllibBackend` with a streamed body silently returned a truncated
+  body when the connection ended before the announced `Content-Length`.
+  It now raises `TransportError`, like the other backends.
 
 - The names an operation field cannot use are now derived from the
   operation base classes instead of being listed by hand. Besides

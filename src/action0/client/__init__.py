@@ -55,6 +55,7 @@ from .hooks import LoggingHook
 from .operation import JsonOperation
 from .operation import Operation
 from .operation import reserved_field_names
+from .options import BodyMode
 from .options import RequestOptions
 from .retry import RetryingAsyncBackend
 from .retry import RetryingDeferredBackend
@@ -77,6 +78,7 @@ __all__ = [
     "BaseAsyncBackend",
     "BaseDeferredBackend",
     "BaseSyncBackend",
+    "BodyMode",
     "CachePolicy",
     "CacheStore",
     "CachingAsyncBackend",

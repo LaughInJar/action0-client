@@ -7,6 +7,7 @@ Requires the ``urllib3`` extra: ``pip install "action0-client[urllib3]"``.
 """
 
 from typing import Any
+from typing import Callable
 from typing import Iterable
 from typing import Iterator
 
@@ -15,18 +16,18 @@ import urllib3
 from action0.req import Request
 from action0.req import Response
 from action0.req.body import BodyTypes
-from action0.req.body import IterableBody
 
 from ..backend import BaseSyncBackend
 from ..errors import TimeoutError
 from ..errors import TransportError
 from ..hooks import Hook
+from ..options import BodyMode
+from ._body import CHUNK_SIZE
+from ._body import body_mode
+from ._body import deliver
 
 DEFAULT_TIMEOUT = 30.0
 """The default total number of seconds to wait for connect + read."""
-
-_CHUNK_SIZE = 65536
-"""The chunk size for streamed response bodies."""
 
 # urllib3 reports the HTTP version of the response as an int
 _HTTP_VERSIONS = {9: "HTTP/0.9", 10: "HTTP/1.0", 11: "HTTP/1.1", 20: "HTTP/2"}
@@ -53,11 +54,11 @@ class Urllib3Backend(BaseSyncBackend):
     - Streaming request bodies work: a
       :py:class:`~action0.req.body.BodyProducer` body is handed to urllib3
       as a chunk iterator.
-    - Streaming *response* bodies are opt-in: with ``stream=True`` the
-      response body is an :py:class:`~action0.req.body.IterableBody`
-      producing the bytes as they arrive instead of preloaded bytes; the
-      connection is held until the body is consumed (or the producer is
-      garbage-collected).
+    - The response body is preloaded bytes by default. A request asks for
+      a streamed or a spooled body with
+      :py:attr:`RequestOptions.body <action0.client.options.RequestOptions.body>`
+      (see :py:class:`~action0.client.options.BodyMode`); ``stream=True``
+      makes streaming this backend's default.
     - Multiple response header lines with the same name are preserved
       (urllib3's header dict keeps them apart).
     - Multiple *request* header lines are merged into one comma-separated
@@ -86,9 +87,11 @@ class Urllib3Backend(BaseSyncBackend):
                         (a :py:class:`urllib3.util.Retry`, a count, or
                         ``False`` to raise transport errors immediately);
                         ``None`` uses urllib3's default
-        :param stream: whether response bodies arrive as streaming
-                       producers instead of preloaded bytes (``send``
-                       then returns at headers arrival)
+        :param stream: whether response bodies are streamed by default
+                       (``send`` then returns at headers arrival); a
+                       request's own
+                       :py:attr:`~action0.client.options.RequestOptions.body`
+                       option takes precedence
         :param hooks: the instrumentation hooks to run around every send
         """
         super().__init__(hooks)
@@ -106,17 +109,23 @@ class Urllib3Backend(BaseSyncBackend):
         :param request: the request to send
         :return: the response
         """
+        mode = body_mode(request, self._stream)
         arguments: dict[str, Any] = {
             "body": _request_data(request),
             "headers": _merged_headers(request),
             "timeout": urllib3.Timeout(total=self._timeout),
             "redirect": self._follow_redirects,
-            "preload_content": not self._stream,
+            "preload_content": mode is BodyMode.PRELOAD,
         }
         if self._retries is not None:
             arguments["retries"] = self._retries
         answer = self._pool.urlopen(request.method, request.url.as_str(), **arguments)
-        body: BodyTypes = _streamed_body(answer) if self._stream else answer.data
+        body: BodyTypes
+        if mode is BodyMode.PRELOAD:
+            body = answer.data
+        else:
+            chunks, close = _open_stream(answer)
+            body = deliver(request, mode, chunks, close, self.translate_error)
         return Response(
             answer.status,
             # urllib3's HTTPHeaderDict keeps multiple lines per field
@@ -179,29 +188,32 @@ class Urllib3Backend(BaseSyncBackend):
         return f"{self.__class__.__name__}()"
 
 
-def _streamed_body(answer: urllib3.BaseHTTPResponse) -> IterableBody:
+def _open_stream(
+    answer: urllib3.BaseHTTPResponse,
+) -> "tuple[Iterator[bytes], Callable[[], None]]":
     """
-    The response body as a streaming producer: chunks are read from the
-    open connection on demand. A fully consumed body releases the
-    connection back into the pool; an abandoned one closes it (a
-    partially read connection must never be reused).
+    The body of an open response as a chunk iterator, with the matching
+    cleanup: a body read to its end releases the connection back into
+    the pool, anything less closes it (a partially read connection must
+    never be reused).
 
     :param answer: the urllib3 response (with ``preload_content=False``)
-    :return: the body producer
+    :return: the chunk iterator and the function releasing the connection
     """
+    completed = False
 
     def chunks() -> Iterator[bytes]:
-        completed = False
-        try:
-            yield from answer.stream(_CHUNK_SIZE)
-            completed = True
-        finally:
-            if completed:
-                answer.release_conn()
-            else:
-                answer.close()
+        nonlocal completed
+        yield from answer.stream(CHUNK_SIZE)
+        completed = True
 
-    return IterableBody(chunks())
+    def close() -> None:
+        if completed:
+            answer.release_conn()
+        else:
+            answer.close()
+
+    return chunks(), close
 
 
 def _merged_headers(request: Request) -> dict[str, str]:
