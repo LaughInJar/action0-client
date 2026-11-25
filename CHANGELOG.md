@@ -21,6 +21,14 @@ numbers follow [Semantic Versioning](https://semver.org/).
   writes run inline, file writes in a worker thread (asyncio or trio);
   the Twisted backend uses the reactor's thread pool and pauses the
   transport during a write.
+- Caching is decided per request: `RequestOptions(cacheable=...)` makes
+  a request cacheable although its method is not GET/HEAD (or keeps one
+  out of the cache), `cache_ttl` sets its lifetime and `cache_key`
+  replaces the computed key.
+- `CachePolicy.max_body_size`: response bodies above this size are not
+  stored. `CachePolicy.ttl_for(request)`.
+- The caching guide shows adapters for a key-value cache with
+  `get` / `set` / ttl, sync and async.
 - `RequestOptions`: typed per-request options, stored in `request.meta`
   under the single key `action0-client`. Set them with
   `RequestOptions(...).apply(request)`, read them with
@@ -44,6 +52,19 @@ numbers follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The cache key of a request with a body now includes a digest of the
+  body. Before, the body was ignored — harmless for the default GET/HEAD
+  policy, but a policy that enabled POST would have answered different
+  bodies from one entry. Keys of requests without a body are unchanged,
+  so existing cache entries stay valid.
+- A request whose body is a streaming producer is not cached unless it
+  carries an explicit `cache_key`.
+- Responses are handed to a `CacheStore` without their `request`
+  reference. The request is not needed to serve a hit, and it carried
+  credentials (an `Authorization` header, a password in the URL) and the
+  request's `meta` into the store. A custom store that read
+  `response.request` now finds `None`.
+- A cache hit is delivered in the body mode the request asks for.
 - An error while a streamed response body is read (a dropped
   connection, a read timeout) is now raised as `TransportError` /
   `TimeoutError` with the HTTP library's exception as `__cause__`.

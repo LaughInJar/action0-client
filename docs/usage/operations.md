@@ -219,8 +219,9 @@ print(request.meta)
 ```
 
 Besides `retry_safe` the options choose how the response body is handed
-over — preloaded, streamed or spooled to a temporary file; see
-{doc}`streaming`.
+over — preloaded, streamed or spooled to a temporary file, see
+{doc}`streaming` — and whether, under which key and for how long the
+response is cached, see {doc}`caching`.
 
 The options travel in `request.meta` under the one key `action0-client`,
 so they are never sent on the wire. Backends and wrappers read them with
