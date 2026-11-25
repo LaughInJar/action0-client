@@ -8,6 +8,7 @@ from typing import ClassVar
 from action0.client import APIError
 from action0.client import JsonOperation
 from action0.client import Operation
+from action0.client import PayloadError
 from action0.client import RequestOptions
 from action0.client import reserved_field_names
 from action0.client.fields import Location
@@ -597,6 +598,24 @@ class ParseTestCase(unittest.TestCase):
         with self.assertRaisesRegex(APIError, "malformed") as caught:
             operation.parse(Response(200, body="{nope"))
         self.assertIsNotNone(caught.exception.__cause__)
+
+    def test_unusable_bodies_raise_payload_errors(self) -> None:
+        """
+        Test that an empty and a malformed body raise PayloadError — an
+        APIError of its own class, so that these failures can be told
+        apart from unexpected statuses — while a bad status stays a
+        plain APIError.
+        """
+        operation = SearchOperation(shelf="a", q="x")
+        for payload in (None, "", "   ", "<html>busy</html>", '{"cut": "off'):
+            with self.subTest(payload=payload):
+                response = Response(200, body=payload)
+                with self.assertRaises(PayloadError) as caught:
+                    operation.parse(response)
+                self.assertIs(caught.exception.response, response)
+        with self.assertRaises(APIError) as refused:
+            operation.parse(Response(500, body="<html>busy</html>"))
+        self.assertNotIsInstance(refused.exception, PayloadError)
 
     def test_load_json_produces_typed_results(self) -> None:
         """

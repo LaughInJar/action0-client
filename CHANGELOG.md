@@ -21,6 +21,15 @@ numbers follow [Semantic Versioning](https://semver.org/).
   writes run inline, file writes in a worker thread (asyncio or trio);
   the Twisted backend uses the reactor's thread pool and pauses the
   transport during a write.
+- Retries can cover parsing: with
+  `RetryPolicy(retry_parse_errors=(PayloadError,))` a response that has
+  an acceptable status but cannot be parsed (an HTML page on a 200, a
+  truncated document) is thrown away and the request sent again — in
+  every execution model, with one attempt counter for transport errors,
+  statuses and parse failures.
+- `PayloadError`, a subclass of `APIError`, raised by
+  `JsonOperation.load` for an empty or malformed body.
+  `RetryPolicy.should_retry_parse_error`.
 - Caching is decided per request: `RequestOptions(cacheable=...)` makes
   a request cacheable although its method is not GET/HEAD (or keeps one
   out of the cache), `cache_ttl` sets its lifetime and `cache_key`
@@ -52,6 +61,21 @@ numbers follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `JsonOperation.load` raises `PayloadError` instead of a plain
+  `APIError` for an empty or malformed body. `PayloadError` is an
+  `APIError`, so existing handlers keep working.
+- Stacked retrying backends no longer multiply their attempts: the
+  outermost one retries, inner ones pass through. Two default policies
+  used to mean up to 9 requests and now mean 3. If you relied on the
+  product, raise `attempts` on the outer policy.
+- A response that a retry throws away is closed before the wait, so a
+  streamed body releases its connection instead of waiting for garbage
+  collection.
+- A caching backend does not store a response the operation cannot
+  parse.
+- `APIClient.send` puts the operation's parse step on the request
+  (`request.meta["action0-client.parse"]`) for the retrying and caching
+  backends. Each response is still parsed exactly once.
 - The cache key of a request with a body now includes a digest of the
   body. Before, the body was ignored — harmless for the default GET/HEAD
   policy, but a policy that enabled POST would have answered different
