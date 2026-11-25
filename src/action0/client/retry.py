@@ -22,6 +22,7 @@ does not retry in lockstep — and honor a ``Retry-After`` response header
 :py:attr:`~RetryPolicy.max_backoff`.
 """
 
+import contextlib
 import datetime
 import email.utils
 import random
@@ -31,12 +32,14 @@ from typing import TYPE_CHECKING
 from typing import Any
 from typing import Awaitable
 from typing import Callable
+from typing import TypeVar
 from typing import cast
 
 from action0.req import Header
 from action0.req import Request
 from action0.req import Response
 
+from ._parse import parse_failure
 from .backend import Backend
 from .errors import TransportError
 from .options import RequestOptions
@@ -137,6 +140,19 @@ class RetryPolicy:
     """The random source for the jitter, returning floats in ``[0, 1)``
     (injectable for deterministic tests)."""
 
+    retry_parse_errors: tuple[type[BaseException], ...] = ()
+    """The exception types that make a response with an acceptable status
+    worth retrying when the operation's ``parse`` raises them — a body
+    that is cut off, or an HTML error page on a 200. Empty by default:
+    parse failures are not retried. ``(PayloadError,)`` covers what
+    :py:class:`~action0.client.operation.JsonOperation` raises for an
+    empty or malformed body; name your own exception types for failures
+    of your ``load``/``load_json``.
+
+    Only requests sent through an
+    :py:class:`~action0.client.api.APIClient` are parsed; a raw
+    :py:class:`~action0.client.client.Client` has no parse step."""
+
     def delay_for(self, attempt: int, response: "Response | None" = None) -> float:
         """
         The seconds to wait after the given (1-based) attempt failed.
@@ -206,6 +222,94 @@ class RetryPolicy:
             and isinstance(error, self.retry_errors)
         )
 
+    def should_retry_parse_error(
+        self, request: Request, response: Response, error: BaseException, attempt: int
+    ) -> bool:
+        """
+        Whether a response that arrived with an acceptable status but
+        could not be parsed should be thrown away and retried.
+
+        :param request: the request that was sent
+        :param response: the response that arrived
+        :param error: what the operation's ``parse`` raised for it
+        :param attempt: the (1-based) attempt that produced it
+        :return: whether to retry
+        """
+        return (
+            attempt < self.attempts
+            and self.applies_to(request)
+            and isinstance(error, self.retry_parse_errors)
+        )
+
+
+T = TypeVar("T")
+
+_OWNER_KEY = "action0-client.retry"
+"""The ``request.meta`` key under which a retrying wrapper marks a request
+as being retried by it, for the duration of its ``send``."""
+
+
+def _claim(request: Request, wrapper: object) -> bool:
+    """
+    Make a wrapper responsible for retrying a request — unless another
+    retrying wrapper further out already is. Stacked retry wrappers
+    would otherwise multiply their attempts (3 x 3 sends for two default
+    policies); with this the outermost one alone retries, and the others
+    pass its attempts through.
+
+    :param request: the request about to be sent
+    :param wrapper: the retrying wrapper asking
+    :return: whether the wrapper is the one to retry this request
+    """
+    return request.meta.setdefault(_OWNER_KEY, wrapper) is wrapper
+
+
+def _release(request: Request, wrapper: object) -> None:
+    """
+    End a wrapper's responsibility for a request, so the request object
+    can be sent again later.
+
+    :param request: the request that was sent
+    :param wrapper: the wrapper that claimed it
+    """
+    if request.meta.get(_OWNER_KEY) is wrapper:
+        del request.meta[_OWNER_KEY]
+
+
+def _retryable_parse_error(
+    policy: RetryPolicy, request: Request, response: Response, attempt: int
+) -> bool:
+    """
+    Whether a response that passed the status check fails to parse in a
+    way the policy retries. Parsing is only attempted when a retry is
+    possible at all — on the last attempt the response goes out as it is
+    and the client's own parse step reports the failure.
+
+    :param policy: the retry policy
+    :param request: the request that was sent
+    :param response: the response that arrived
+    :param attempt: the (1-based) attempt that produced it
+    :return: whether to throw the response away and send again
+    """
+    if not policy.retry_parse_errors or attempt >= policy.attempts:
+        return False
+    if not policy.applies_to(request):
+        return False
+    error = parse_failure(request, response)
+    return error is not None and policy.should_retry_parse_error(request, response, error, attempt)
+
+
+def _discard(response: Response) -> None:
+    """
+    Release what a response that is being thrown away still holds (the
+    connection of a streamed body, the temporary file of a spooled one)
+    instead of leaving it to the garbage collector.
+
+    :param response: the rejected response
+    """
+    with contextlib.suppress(Exception):
+        response.close()
+
 
 class RetryingSyncBackend(SyncBackendWrapper):
     """
@@ -255,19 +359,39 @@ class RetryingSyncBackend(SyncBackendWrapper):
         :return: the response of the last attempt
         :raises BaseException: the error of the last attempt
         """
+        if not _claim(request, self):
+            # a retrying wrapper further out is in charge of this request
+            return self._inner.send(request)
+        try:
+            return self._send_with_retries(request)
+        finally:
+            _release(request, self)
+
+    def _send_with_retries(self, request: Request) -> Response:
+        """
+        The retry loop: one attempt counter for transport errors,
+        transient statuses and unparseable responses alike.
+
+        :param request: the request to send
+        :return: the response of the last attempt
+        """
+        policy = self._policy
         attempt = 1
         while True:
             rejected: "Response | None" = None
             try:
                 response = self._inner.send(request)
             except Exception as error:
-                if not self._policy.should_retry_error(request, error, attempt):
+                if not policy.should_retry_error(request, error, attempt):
                     raise
             else:
-                if not self._policy.should_retry_response(request, response, attempt):
+                if not policy.should_retry_response(
+                    request, response, attempt
+                ) and not _retryable_parse_error(policy, request, response, attempt):
                     return response
                 rejected = response
-            self._sleep(self._policy.delay_for(attempt, rejected))
+                _discard(rejected)
+            self._sleep(policy.delay_for(attempt, rejected))
             attempt += 1
 
 
@@ -308,6 +432,22 @@ class RetryingAsyncBackend(AsyncBackendWrapper):
         :raises BaseException: the error of the last attempt, at ``await``
                 time
         """
+        if not _claim(request, self):
+            # a retrying wrapper further out is in charge of this request
+            return await self._inner.send(request)
+        try:
+            return await self._send_with_retries(request)
+        finally:
+            _release(request, self)
+
+    async def _send_with_retries(self, request: Request) -> Response:
+        """
+        The retry loop: one attempt counter for transport errors,
+        transient statuses and unparseable responses alike.
+
+        :param request: the request to send
+        :return: the response of the last attempt
+        """
         if self._sleep is None:
             import asyncio
 
@@ -315,19 +455,24 @@ class RetryingAsyncBackend(AsyncBackendWrapper):
         else:
             sleep = self._sleep
 
+        policy = self._policy
         attempt = 1
         while True:
             rejected: "Response | None" = None
             try:
                 response = await self._inner.send(request)
             except Exception as error:
-                if not self._policy.should_retry_error(request, error, attempt):
+                if not policy.should_retry_error(request, error, attempt):
                     raise
             else:
-                if not self._policy.should_retry_response(request, response, attempt):
+                if not policy.should_retry_response(
+                    request, response, attempt
+                ) and not _retryable_parse_error(policy, request, response, attempt):
                     return response
                 rejected = response
-            await sleep(self._policy.delay_for(attempt, rejected))
+                with contextlib.suppress(Exception):
+                    await rejected.aclose()
+            await sleep(policy.delay_for(attempt, rejected))
             attempt += 1
 
 
@@ -369,6 +514,10 @@ class RetryingDeferredBackend(DeferredBackendWrapper):
         """
         from twisted.internet.task import deferLater
 
+        if not _claim(request, self):
+            # a retrying wrapper further out is in charge of this request
+            return self._inner.send(request)
+
         if self._reactor is None:
             # deliberately imported here: importing the global reactor at
             # module import time would install it as a side effect
@@ -377,20 +526,25 @@ class RetryingDeferredBackend(DeferredBackendWrapper):
             self._reactor = global_reactor
         clock = self._reactor
 
+        policy = self._policy
+
         def attempt_once(attempt: int) -> "Deferred[Response]":
             def on_response(response: Response) -> "Response | Deferred[Response]":
-                if not self._policy.should_retry_response(request, response, attempt):
+                if not policy.should_retry_response(
+                    request, response, attempt
+                ) and not _retryable_parse_error(policy, request, response, attempt):
                     return response
+                _discard(response)
                 return wait_and_repeat(response)
 
             def on_failure(failure: "Failure") -> "Failure | Deferred[Response]":
                 error = failure.value
-                if error is None or not self._policy.should_retry_error(request, error, attempt):
+                if error is None or not policy.should_retry_error(request, error, attempt):
                     return failure
                 return wait_and_repeat(None)
 
             def wait_and_repeat(rejected: "Response | None") -> "Deferred[Response]":
-                delay = self._policy.delay_for(attempt, rejected)
+                delay = policy.delay_for(attempt, rejected)
                 waited: "Deferred[None]" = deferLater(clock, delay)
                 return waited.addCallback(lambda _: attempt_once(attempt + 1))
 
@@ -399,4 +553,13 @@ class RetryingDeferredBackend(DeferredBackendWrapper):
                 self._inner.send(request).addCallbacks(on_response, on_failure),
             )
 
-        return attempt_once(1)
+        def released(outcome: T) -> T:
+            _release(request, self)
+            return outcome
+
+        try:
+            return attempt_once(1).addBoth(released)
+        except BaseException:
+            # the wrapped send raised instead of returning a Deferred
+            _release(request, self)
+            raise

@@ -62,6 +62,7 @@ from action0.url.params import Params
 from action0.url.params import ParamValue
 
 from .errors import APIError
+from .errors import PayloadError
 from .fields import _METADATA_KEY
 from .fields import FieldSpec
 from .fields import Location
@@ -663,12 +664,12 @@ class JsonOperation(Operation[R_co]):
 
         :param response: the response, already vetted by :py:meth:`check`
         :return: the parsed result
-        :raises action0.client.errors.APIError: if the body is empty or no
-                valid JSON
+        :raises action0.client.errors.PayloadError: if the body is empty
+                or no valid JSON
         """
         text = response.body_str()
         if text is None or not text.strip():
-            raise APIError(
+            raise PayloadError(
                 f"{type(self).__name__}: expected a JSON body, got none",
                 request=response.request,
                 response=response,
@@ -676,7 +677,7 @@ class JsonOperation(Operation[R_co]):
         try:
             data = json.loads(text)
         except ValueError as error:
-            raise APIError(
+            raise PayloadError(
                 f"{type(self).__name__}: malformed JSON body ({error})",
                 request=response.request,
                 response=response,

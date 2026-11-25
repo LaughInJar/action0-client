@@ -34,6 +34,7 @@ from typing import Protocol
 from action0.req import Request
 from action0.req import Response
 
+from ._parse import parse_failure
 from .backend import Backend
 from .backends._body import adeliver_bytes
 from .backends._body import deliver_bytes
@@ -297,6 +298,25 @@ class CachePolicy:
         return len(response.body_bytes() or b"") <= self.max_body_size
 
 
+def _worth_storing(policy: CachePolicy, request: Request, response: Response) -> bool:
+    """
+    Whether a fresh response goes into the cache: the policy must allow
+    it, and — for a request sent through an
+    :py:class:`~action0.client.api.APIClient` — the operation must be
+    able to parse it. A 200 carrying an HTML error page or a truncated
+    document would otherwise be served again and again until it expires.
+
+    The parse result is remembered, so the client's own parse step does
+    not run a second time.
+
+    :param policy: the cache policy
+    :param request: the request that was sent
+    :param response: the response that arrived
+    :return: whether to store it
+    """
+    return policy.should_store(request, response) and parse_failure(request, response) is None
+
+
 def _entry(response: Response) -> Response:
     """
     What goes into the store for a response: an independent copy without
@@ -395,7 +415,7 @@ class CachingSyncBackend(SyncBackendWrapper):
         if cached is not None:
             return _fresh_copy(cached, request)
         response = self._inner.send(request)
-        if self._policy.should_store(request, response):
+        if _worth_storing(self._policy, request, response):
             self._store.set(key, _entry(response), self._policy.ttl_for(request))
         return response
 
@@ -475,7 +495,7 @@ class CachingAsyncBackend(AsyncBackendWrapper):
         if cached is not None:
             return await _afresh_copy(cached, request)
         response = await self._inner.send(request)
-        if self._policy.should_store(request, response):
+        if _worth_storing(self._policy, request, response):
             await self._keep(key, _entry(response), self._policy.ttl_for(request))
         return response
 
@@ -528,7 +548,7 @@ class CachingDeferredBackend(DeferredBackendWrapper):
             return succeed(_fresh_copy(cached, request))
 
         def store_and_pass(response: Response) -> Response:
-            if self._policy.should_store(request, response):
+            if _worth_storing(self._policy, request, response):
                 self._store.set(key, _entry(response), self._policy.ttl_for(request))
             return response
 

@@ -12,6 +12,10 @@ code never depends on the HTTP library:
 - {py:class}`~action0.client.errors.APIError` — an HTTP response arrived
   but was unusable (unexpected status, malformed payload); carries
   `.request` and `.response`
+- {py:class}`~action0.client.errors.PayloadError` — the `APIError` for a
+  response whose status was fine but whose body was not: empty, cut off,
+  or an HTML page where JSON was expected. A class of its own so that a
+  {doc}`retry policy <retries>` can retry exactly these
 
 ```python
 from action0.client import APIError

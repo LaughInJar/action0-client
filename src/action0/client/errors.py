@@ -74,3 +74,17 @@ class APIError(ClientError):
         """The request that was sent, ``None`` if unknown."""
         self.response = response
         """The response that could not be handled, ``None`` if there is none."""
+
+
+class PayloadError(APIError):
+    """
+    The response arrived with an acceptable status, but its body is not
+    what the operation can work with — empty, cut off, or an HTML error
+    page where JSON was expected.
+
+    A subclass of :py:class:`APIError`, so existing handlers keep
+    catching it. Being a class of its own lets a
+    :py:class:`~action0.client.retry.RetryPolicy` retry exactly these
+    failures (``retry_parse_errors=(PayloadError,)``) without also
+    retrying every unexpected status.
+    """

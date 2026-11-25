@@ -1,18 +1,23 @@
 import datetime
 import email.utils
 import unittest
+from collections.abc import AsyncIterator
 from typing import Any
+from typing import ClassVar
 
 from twisted.internet.task import Clock
 
 from action0.client import APIClient
 from action0.client import APIError
+from action0.client import Client
 from action0.client import JsonOperation
+from action0.client import PayloadError
 from action0.client import RequestOptions
 from action0.client import RetryPolicy
 from action0.client import TransportError
 from action0.client import query
 from action0.client.backends.futures import ThreadPoolBackend
+from action0.client.caching import CachingSyncBackend
 from action0.client.retry import RetryingAsyncBackend
 from action0.client.retry import RetryingDeferredBackend
 from action0.client.retry import RetryingSyncBackend
@@ -20,6 +25,8 @@ from action0.client.testing import AsyncStubBackend
 from action0.client.testing import DeferredStubBackend
 from action0.client.testing import StubBackend
 from action0.client.testing import deferred_result
+from action0.req import AsyncIterableBody
+from action0.req import IterableBody
 from action0.req import Method
 from action0.req import Request
 from action0.req import Response
@@ -547,3 +554,444 @@ class RetrySafeTestCase(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(APIError):
                 client.send(CreateOrder()).result(timeout=5)
         self.assertEqual(len(inner.requests), 1)
+
+
+def html() -> Response:
+    """A 200 that is not what a JSON operation expects."""
+    return Response(200, headers={"Content-Type": "text/html"}, body="<html>busy</html>")
+
+
+def pong() -> Response:
+    """A good answer for :py:class:`Ping`."""
+    return Response(200, body='{"pong": true}')
+
+
+class CountingPing(JsonOperation[Any]):
+    """A ping that counts how often a response body was decoded."""
+
+    path = "/ping"
+    loads: ClassVar[list[int]] = []
+
+    def load(self, response: Response) -> Any:
+        self.loads.append(response.status)
+        return super().load(response)
+
+
+class ParseRetryTestCase(unittest.IsolatedAsyncioTestCase):
+    """
+    tests for retries that cover parsing: a response with an acceptable
+    status that the operation cannot parse is retried when the policy
+    names the error (``retry_parse_errors``)
+    """
+
+    BASE_URL = "https://api.example.com"
+
+    def setUp(self) -> None:
+        self.policy = RetryPolicy(attempts=3, backoff=0, retry_parse_errors=(PayloadError,))
+        CountingPing.loads.clear()
+
+    def sync_client(self, *responses: Any, policy: "RetryPolicy | None" = None) -> Any:
+        """
+        An APIClient over a retrying stub backend.
+
+        :param responses: the stub's script
+        :param policy: the retry policy (default: the parse-retrying one)
+        :return: the client and the stub
+        """
+        inner = StubBackend(*responses)
+        backend = RetryingSyncBackend(inner, policy or self.policy)
+        return APIClient(backend, self.BASE_URL), inner
+
+    def test_unparseable_response_is_retried(self) -> None:
+        """
+        Test the motivating case: an HTML page on a 200 is thrown away
+        and the request sent again until the body parses.
+        """
+        client, inner = self.sync_client(html(), html(), pong())
+        self.assertEqual(client.send(Ping()), {"pong": True})
+        self.assertEqual(len(inner.requests), 3)
+
+    def test_parse_failures_are_not_retried_by_default(self) -> None:
+        """
+        Test the opt-in: without ``retry_parse_errors`` the failure
+        surfaces at once, as before.
+        """
+        client, inner = self.sync_client(html(), pong(), policy=RetryPolicy(backoff=0))
+        with self.assertRaises(PayloadError):
+            client.send(Ping())
+        self.assertEqual(len(inner.requests), 1)
+
+    def test_each_response_is_parsed_once(self) -> None:
+        """
+        Test that the retry wrapper and the client share one parse run
+        per response: three responses, three decodes — not four.
+        """
+        client, _inner = self.sync_client(html(), html(), pong())
+        self.assertEqual(client.send(CountingPing()), {"pong": True})
+        self.assertEqual(CountingPing.loads, [200, 200, 200])
+
+    def test_one_attempt_counter_for_every_kind_of_failure(self) -> None:
+        """
+        Test that transport errors, transient statuses and parse
+        failures draw on the same budget: three attempts are three
+        sends, whatever went wrong in between.
+        """
+        outcomes: "list[Response | Exception]" = [TransportError("reset"), Response(503), pong()]
+
+        def flaky(request: Request) -> Response:
+            outcome = outcomes.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+
+        client, inner = self.sync_client(flaky)
+        self.assertEqual(client.send(Ping()), {"pong": True})
+        self.assertEqual(len(inner.requests), 3)
+
+        client, inner = self.sync_client(Response(503), html(), html(), pong())
+        with self.assertRaises(PayloadError):
+            client.send(Ping())
+        self.assertEqual(len(inner.requests), 3)
+
+    def test_exhausted_attempts_raise_the_last_parse_error(self) -> None:
+        """
+        Test that when the attempts run out on parse failures, the error
+        of the last response is raised as-is, with that response
+        attached.
+        """
+        client, inner = self.sync_client(html(), html(), html(), pong())
+        with self.assertRaises(PayloadError) as raised:
+            client.send(Ping())
+        self.assertEqual(len(inner.requests), 3)
+        last = raised.exception.response
+        assert last is not None
+        self.assertIs(last.request, inner.requests[2])
+
+    def test_only_the_named_errors_are_retried(self) -> None:
+        """
+        Test that naming PayloadError does not retry unexpected
+        statuses (an APIError from ``check``), and that an operation's
+        own exception types can be named.
+        """
+        client, inner = self.sync_client(Response(404), pong())
+        with self.assertRaises(APIError):
+            client.send(Ping())
+        self.assertEqual(len(inner.requests), 1)
+
+        class Strict(JsonOperation[Any]):
+            path = "/ping"
+
+            def load_json(self, data: Any) -> Any:
+                return data["pong"]
+
+        policy = RetryPolicy(attempts=3, backoff=0, retry_parse_errors=(KeyError,))
+        client, inner = self.sync_client(Response(200, body="{}"), pong(), policy=policy)
+        self.assertIs(client.send(Strict()), True)
+        self.assertEqual(len(inner.requests), 2)
+
+    def test_method_gate_applies_to_parse_retries(self) -> None:
+        """
+        Test that a non-idempotent request is not sent again because of
+        a parse failure — unless it declares itself safe to retry.
+        """
+        client, inner = self.sync_client(html(), pong())
+        with self.assertRaises(PayloadError):
+            client.send(CreateOrder())
+        self.assertEqual(len(inner.requests), 1)
+
+        client, inner = self.sync_client(html(), Response(200, body='{"text": "hallo"}'))
+        self.assertEqual(client.send(Translate()), {"text": "hallo"})
+        self.assertEqual(len(inner.requests), 2)
+
+    def test_raw_client_has_no_parse_step(self) -> None:
+        """
+        Test that a request sent through the raw Client is never judged
+        by its body: there is no operation to parse it.
+        """
+        inner = StubBackend(html(), pong())
+        client = Client(RetryingSyncBackend(inner, self.policy))
+        response = client.send(Request(f"{self.BASE_URL}/ping"))
+        self.assertEqual(response.body_str(), "<html>busy</html>")
+        self.assertEqual(len(inner.requests), 1)
+
+    async def test_async(self) -> None:
+        """
+        Test parse retries on an async backend.
+        """
+        inner = AsyncStubBackend(html(), html(), pong())
+        client = APIClient(RetryingAsyncBackend(inner, self.policy), self.BASE_URL)
+        self.assertEqual(await client.send(CountingPing()), {"pong": True})
+        self.assertEqual(len(inner.requests), 3)
+        self.assertEqual(CountingPing.loads, [200, 200, 200])
+
+    def test_deferred(self) -> None:
+        """
+        Test parse retries on a Twisted backend.
+        """
+        clock = Clock()
+        inner = DeferredStubBackend(html(), html(), pong())
+        backend = RetryingDeferredBackend(inner, self.policy, reactor=clock)
+        deferred = APIClient(backend, self.BASE_URL).send(CountingPing())
+        clock.pump([0, 0])
+        self.assertEqual(deferred_result(deferred), {"pong": True})
+        self.assertEqual(len(inner.requests), 3)
+        self.assertEqual(CountingPing.loads, [200, 200, 200])
+
+    def test_futures(self) -> None:
+        """
+        Test parse retries through the thread-pool backend.
+        """
+        inner = StubBackend(html(), html(), pong())
+        with ThreadPoolBackend(RetryingSyncBackend(inner, self.policy)) as backend:
+            client = APIClient(backend, self.BASE_URL)
+            self.assertEqual(client.send(CountingPing()).result(timeout=5), {"pong": True})
+        self.assertEqual(len(inner.requests), 3)
+        self.assertEqual(CountingPing.loads, [200, 200, 200])
+
+    def test_unparseable_response_is_not_cached(self) -> None:
+        """
+        Test that a caching backend does not store a response the
+        operation cannot parse — the HTML page on a 200 must not be
+        served from the cache for a whole ttl.
+        """
+        inner = StubBackend(html(), pong())
+        client = APIClient(CachingSyncBackend(inner), self.BASE_URL)
+        with self.assertRaises(PayloadError):
+            client.send(Ping())
+        self.assertEqual(client.send(Ping()), {"pong": True})  # the network again
+        self.assertEqual(client.send(Ping()), {"pong": True})  # now cached
+        self.assertEqual(len(inner.requests), 2)
+
+    def test_cache_around_a_parse_retrying_backend(self) -> None:
+        """
+        Test the full stack cache → retry → backend: the retry replaces
+        the bad response, the cache stores the good one.
+        """
+        inner = StubBackend(html(), pong())
+        backend = CachingSyncBackend(RetryingSyncBackend(inner, self.policy))
+        client = APIClient(backend, self.BASE_URL)
+        self.assertEqual(client.send(Ping()), {"pong": True})
+        self.assertEqual(client.send(Ping()), {"pong": True})
+        self.assertEqual(len(inner.requests), 2)
+
+
+class ExhaustedStatusTestCase(unittest.IsolatedAsyncioTestCase):
+    """
+    tests for running out of attempts on a retryable status: the last
+    response still reaches ``Operation.check``, which raises an APIError
+    with that response attached — in every execution model
+    """
+
+    BASE_URL = "https://api.example.com"
+
+    def setUp(self) -> None:
+        self.policy = RetryPolicy(attempts=3, backoff=0)
+        self.responses = [Response(503, body=f"attempt {number}") for number in (1, 2, 3, 4)]
+
+    def check(self, error: BaseException, sent: int) -> None:
+        """
+        Assert that the error is the APIError for the last response.
+
+        :param error: the exception the send ended with
+        :param sent: how many requests reached the stub
+        """
+        assert isinstance(error, APIError)
+        self.assertEqual(sent, 3)
+        last = error.response
+        assert last is not None
+        self.assertEqual(last.status, 503)
+        self.assertEqual(last.body_str(), "attempt 3")
+
+    def test_sync(self) -> None:
+        """
+        Test the synchronous model.
+        """
+        inner = StubBackend(*self.responses)
+        client = APIClient(RetryingSyncBackend(inner, self.policy), self.BASE_URL)
+        with self.assertRaises(APIError) as raised:
+            client.send(Ping())
+        self.check(raised.exception, len(inner.requests))
+
+    async def test_async(self) -> None:
+        """
+        Test the asyncio model.
+        """
+        inner = AsyncStubBackend(*self.responses)
+        client = APIClient(RetryingAsyncBackend(inner, self.policy), self.BASE_URL)
+        with self.assertRaises(APIError) as raised:
+            await client.send(Ping())
+        self.check(raised.exception, len(inner.requests))
+
+    def test_deferred(self) -> None:
+        """
+        Test the Twisted model.
+        """
+        clock = Clock()
+        inner = DeferredStubBackend(*self.responses)
+        backend = RetryingDeferredBackend(inner, self.policy, reactor=clock)
+        deferred = APIClient(backend, self.BASE_URL).send(Ping())
+        clock.pump([0, 0])
+        with self.assertRaises(APIError) as raised:
+            deferred_result(deferred)
+        self.check(raised.exception, len(inner.requests))
+
+    def test_futures(self) -> None:
+        """
+        Test the thread-pool model.
+        """
+        inner = StubBackend(*self.responses)
+        with ThreadPoolBackend(RetryingSyncBackend(inner, self.policy)) as backend:
+            future = APIClient(backend, self.BASE_URL).send(Ping())
+            with self.assertRaises(APIError) as raised:
+                future.result(timeout=5)
+        self.check(raised.exception, len(inner.requests))
+
+
+class NestedRetryTestCase(unittest.IsolatedAsyncioTestCase):
+    """
+    tests for stacked retrying wrappers: the outermost one retries, the
+    inner ones pass its attempts through — attempts never multiply
+    """
+
+    def setUp(self) -> None:
+        self.policy = RetryPolicy(attempts=3, backoff=0)
+        self.request = Request("https://api.example.com/ping")
+
+    def test_sync_attempts_do_not_multiply(self) -> None:
+        """
+        Test that two stacked wrappers with three attempts each send
+        three times, not nine — and that the request can be sent again
+        afterwards with a fresh budget.
+        """
+        inner = StubBackend(Response(503))
+        backend = RetryingSyncBackend(RetryingSyncBackend(inner, self.policy), self.policy)
+        self.assertEqual(backend.send(self.request).status, 503)
+        self.assertEqual(len(inner.requests), 3)
+        self.assertEqual(backend.send(self.request).status, 503)
+        self.assertEqual(len(inner.requests), 6)
+        self.assertEqual(self.request.meta, {})
+
+    def test_outer_policy_decides(self) -> None:
+        """
+        Test which policy applies: the outermost wrapper's — an inner
+        wrapper that would retry does not when the outer one gives up.
+        """
+        inner = StubBackend(Response(503), Response(200))
+        outer_policy = RetryPolicy(attempts=1)
+        backend = RetryingSyncBackend(RetryingSyncBackend(inner, self.policy), outer_policy)
+        self.assertEqual(backend.send(self.request).status, 503)
+        self.assertEqual(len(inner.requests), 1)
+
+    def test_request_is_released_after_an_error(self) -> None:
+        """
+        Test that a send ending in an exception leaves no mark on the
+        request either.
+        """
+
+        def explode(request: Request) -> Response:
+            raise TransportError("reset")
+
+        inner = StubBackend(explode)
+        backend = RetryingSyncBackend(RetryingSyncBackend(inner, self.policy), self.policy)
+        with self.assertRaises(TransportError):
+            backend.send(self.request)
+        self.assertEqual(len(inner.requests), 3)
+        self.assertEqual(self.request.meta, {})
+
+    async def test_async_attempts_do_not_multiply(self) -> None:
+        """
+        Test the same on async wrappers.
+        """
+        inner = AsyncStubBackend(Response(503))
+        backend = RetryingAsyncBackend(RetryingAsyncBackend(inner, self.policy), self.policy)
+        self.assertEqual((await backend.send(self.request)).status, 503)
+        self.assertEqual(len(inner.requests), 3)
+        self.assertEqual(self.request.meta, {})
+
+    def test_deferred_attempts_do_not_multiply(self) -> None:
+        """
+        Test the same on Twisted wrappers.
+        """
+        clock = Clock()
+        inner = DeferredStubBackend(Response(503))
+        backend = RetryingDeferredBackend(
+            RetryingDeferredBackend(inner, self.policy, reactor=clock), self.policy, reactor=clock
+        )
+        deferred = backend.send(self.request)
+        clock.pump([0, 0])
+        self.assertEqual(deferred_result(deferred).status, 503)
+        self.assertEqual(len(inner.requests), 3)
+        self.assertEqual(self.request.meta, {})
+
+
+class DiscardedResponseTestCase(unittest.IsolatedAsyncioTestCase):
+    """
+    tests for what happens to a response a retry throws away: it is
+    closed, so a streamed body releases its connection right away
+    """
+
+    def setUp(self) -> None:
+        self.policy = RetryPolicy(attempts=3, backoff=0)
+        self.closed: list[int] = []
+        self.request = Request("https://api.example.com/feed")
+
+    def streamed(self, status: int, number: int) -> Response:
+        """
+        A response with a streamed body that records being closed.
+
+        :param status: the response status
+        :param number: the number the close callback records
+        :return: the response
+        """
+        body = IterableBody(iter([b"data"]), close=lambda: self.closed.append(number))
+        return Response(status, body=body)
+
+    def test_sync(self) -> None:
+        """
+        Test that the rejected responses are closed and the returned one
+        is not.
+        """
+        inner = StubBackend(self.streamed(503, 1), self.streamed(503, 2), self.streamed(200, 3))
+        response = RetryingSyncBackend(inner, self.policy).send(self.request)
+        self.assertEqual(self.closed, [1, 2])
+        self.assertEqual(response.body_bytes(), b"data")
+
+    def test_last_response_is_left_open(self) -> None:
+        """
+        Test that the response of the last attempt is handed out
+        untouched, although its status is one the policy retries.
+        """
+        inner = StubBackend(*(self.streamed(503, number) for number in (1, 2, 3)))
+        response = RetryingSyncBackend(inner, self.policy).send(self.request)
+        self.assertEqual(self.closed, [1, 2])
+        self.assertEqual(response.status, 503)
+        self.assertEqual(response.body_bytes(), b"data")
+
+    async def test_async(self) -> None:
+        """
+        Test that an async streamed body of a rejected response is
+        closed with its ``aclose``.
+        """
+
+        async def chunks() -> AsyncIterator[bytes]:
+            yield b"data"
+
+        async def release() -> None:
+            self.closed.append(1)
+
+        rejected = Response(503, body=AsyncIterableBody(chunks(), aclose=release))
+        inner = AsyncStubBackend(rejected, Response(200))
+        response = await RetryingAsyncBackend(inner, self.policy).send(self.request)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(self.closed, [1])
+
+    def test_deferred(self) -> None:
+        """
+        Test the same on the Twisted wrapper.
+        """
+        clock = Clock()
+        inner = DeferredStubBackend(self.streamed(503, 1), Response(200))
+        deferred = RetryingDeferredBackend(inner, self.policy, reactor=clock).send(self.request)
+        clock.pump([0])
+        self.assertEqual(deferred_result(deferred).status, 200)
+        self.assertEqual(self.closed, [1])

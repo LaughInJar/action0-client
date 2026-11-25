@@ -39,6 +39,7 @@ from .caching import MemoryCache
 from .client import Client
 from .errors import APIError
 from .errors import ClientError
+from .errors import PayloadError
 from .errors import TimeoutError
 from .errors import TransportError
 from .fields import FieldSpec
@@ -96,6 +97,7 @@ __all__ = [
     "LoggingHook",
     "MemoryCache",
     "Operation",
+    "PayloadError",
     "RequestOptions",
     "RetryPolicy",
     "RetryingAsyncBackend",

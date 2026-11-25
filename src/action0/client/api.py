@@ -20,6 +20,8 @@ from action0.req import Response
 from action0.req.headers import HeaderTypes
 from action0.url import Url
 
+from ._parse import PARSE_KEY
+from ._parse import ParseOnce
 from .backend import Backend
 from .backend import BackendT_co
 from .operation import Operation
@@ -198,8 +200,13 @@ class APIClient(Generic[BackendT_co]):
                 being raised here)
         """
         request = self.prepare(operation.as_request(self.base_url))
+        # the parse step rides along on the request, so that retrying and
+        # caching wrappers can ask whether a response is usable; the memo
+        # makes sure parsing still runs once per response
+        parse = ParseOnce(operation.parse)
+        request.meta[PARSE_KEY] = parse
         backend = self._backend
-        return backend.map(backend.send(request), operation.parse)
+        return backend.map(backend.send(request), parse)
 
     def __repr__(self) -> str:
         """
