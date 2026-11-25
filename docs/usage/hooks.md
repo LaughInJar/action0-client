@@ -59,3 +59,9 @@ class DefaultUserAgentHook(Hook):
 
 Hooks can be passed to any built-in backend (`hooks=[...]`) or appended
 later (`backend.hooks.append(...)`).
+
+A hook cannot `await`, send a request again or skip the send. For that —
+a rate limiter that must be awaited before each request, say — write a
+[backend wrapper](wrappers.md). That page also explains what hooks see
+when retry and caching wrappers are stacked on top of a backend: every
+attempt of a retried request, and nothing of a cache hit.

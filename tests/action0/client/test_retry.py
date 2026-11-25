@@ -6,10 +6,13 @@ from typing import Any
 from twisted.internet.task import Clock
 
 from action0.client import APIClient
+from action0.client import APIError
 from action0.client import JsonOperation
+from action0.client import RequestOptions
 from action0.client import RetryPolicy
 from action0.client import TransportError
 from action0.client import query
+from action0.client.backends.futures import ThreadPoolBackend
 from action0.client.retry import RetryingAsyncBackend
 from action0.client.retry import RetryingDeferredBackend
 from action0.client.retry import RetryingSyncBackend
@@ -17,6 +20,7 @@ from action0.client.testing import AsyncStubBackend
 from action0.client.testing import DeferredStubBackend
 from action0.client.testing import StubBackend
 from action0.client.testing import deferred_result
+from action0.req import Method
 from action0.req import Request
 from action0.req import Response
 
@@ -419,3 +423,127 @@ class RetryingDeferredBackendTestCase(unittest.TestCase):
         clock.advance(0.5)
 
         self.assertEqual(deferred_result(deferred), {"pong": True})
+
+
+class Translate(JsonOperation[Any]):
+    """A POST endpoint that only reads — safe to send again."""
+
+    method = Method.POST
+    path = "/translate"
+    request_options = RequestOptions(retry_safe=True)
+
+
+class CreateOrder(JsonOperation[Any]):
+    """A POST endpoint with a side effect — the default applies."""
+
+    method = Method.POST
+    path = "/orders"
+
+
+class RetrySafeTestCase(unittest.IsolatedAsyncioTestCase):
+    """
+    tests for per-request retry safety
+    (:py:attr:`action0.client.options.RequestOptions.retry_safe`) under
+    the default policy, which retries idempotent methods only
+    """
+
+    BASE_URL = "https://api.example.com"
+
+    def setUp(self) -> None:
+        self.policy = RetryPolicy(attempts=3, backoff=0)
+        self.responses = (Response(503), Response(503), Response(200, body='{"text": "hallo"}'))
+
+    def test_policy_takes_the_request_at_its_word(self) -> None:
+        """
+        Test both directions of the override and the fallback to the
+        method gate — also for a policy that allows every method.
+        """
+        post = Request("https://example.com/", "POST")
+        safe_post = RequestOptions(retry_safe=True).apply(post.copy())
+        get = Request("https://example.com/")
+        unsafe_get = RequestOptions(retry_safe=False).apply(get.copy())
+        undecided_get = RequestOptions().apply(get.copy())
+
+        policy = RetryPolicy()
+        self.assertFalse(policy.applies_to(post))
+        self.assertTrue(policy.applies_to(safe_post))
+        self.assertTrue(policy.applies_to(get))
+        self.assertFalse(policy.applies_to(unsafe_get))
+        self.assertTrue(policy.applies_to(undecided_get))
+
+        self.assertTrue(policy.should_retry_response(safe_post, Response(503), 1))
+        self.assertTrue(policy.should_retry_error(safe_post, TransportError("reset"), 1))
+        self.assertFalse(policy.should_retry_response(unsafe_get, Response(503), 1))
+        # safety lifts the method gate only: attempts and statuses still count
+        self.assertFalse(policy.should_retry_response(safe_post, Response(503), 3))
+        self.assertFalse(policy.should_retry_response(safe_post, Response(404), 1))
+
+        self.assertFalse(RetryPolicy(methods=None).applies_to(unsafe_get))
+
+    def test_sync(self) -> None:
+        """
+        Test that the declared-safe POST is retried and the plain POST is
+        not, on a synchronous backend.
+        """
+        inner = StubBackend(*self.responses)
+        client = APIClient(RetryingSyncBackend(inner, self.policy), self.BASE_URL)
+        self.assertEqual(client.send(Translate()), {"text": "hallo"})
+        self.assertEqual(len(inner.requests), 3)
+
+        inner = StubBackend(*self.responses)
+        client = APIClient(RetryingSyncBackend(inner, self.policy), self.BASE_URL)
+        with self.assertRaises(APIError):
+            client.send(CreateOrder())
+        self.assertEqual(len(inner.requests), 1)
+
+    async def test_async(self) -> None:
+        """
+        Test the same on an async backend.
+        """
+        inner = AsyncStubBackend(*self.responses)
+        client = APIClient(RetryingAsyncBackend(inner, self.policy), self.BASE_URL)
+        self.assertEqual(await client.send(Translate()), {"text": "hallo"})
+        self.assertEqual(len(inner.requests), 3)
+
+        inner = AsyncStubBackend(*self.responses)
+        client = APIClient(RetryingAsyncBackend(inner, self.policy), self.BASE_URL)
+        with self.assertRaises(APIError):
+            await client.send(CreateOrder())
+        self.assertEqual(len(inner.requests), 1)
+
+    def test_deferred(self) -> None:
+        """
+        Test the same on a Twisted backend (a Clock runs the zero-length
+        backoff timers).
+        """
+        clock = Clock()
+        inner = DeferredStubBackend(*self.responses)
+        backend = RetryingDeferredBackend(inner, self.policy, reactor=clock)
+        deferred = APIClient(backend, self.BASE_URL).send(Translate())
+        clock.pump([0, 0])
+        self.assertEqual(deferred_result(deferred), {"text": "hallo"})
+        self.assertEqual(len(inner.requests), 3)
+
+        inner = DeferredStubBackend(*self.responses)
+        backend = RetryingDeferredBackend(inner, self.policy, reactor=clock)
+        with self.assertRaises(APIError):
+            deferred_result(APIClient(backend, self.BASE_URL).send(CreateOrder()))
+        self.assertEqual(len(inner.requests), 1)
+
+    def test_futures(self) -> None:
+        """
+        Test the same through the thread-pool backend, where the retry
+        loop runs in the worker thread.
+        """
+        inner = StubBackend(*self.responses)
+        with ThreadPoolBackend(RetryingSyncBackend(inner, self.policy)) as backend:
+            client = APIClient(backend, self.BASE_URL)
+            self.assertEqual(client.send(Translate()).result(timeout=5), {"text": "hallo"})
+        self.assertEqual(len(inner.requests), 3)
+
+        inner = StubBackend(*self.responses)
+        with ThreadPoolBackend(RetryingSyncBackend(inner, self.policy)) as backend:
+            client = APIClient(backend, self.BASE_URL)
+            with self.assertRaises(APIError):
+                client.send(CreateOrder()).result(timeout=5)
+        self.assertEqual(len(inner.requests), 1)

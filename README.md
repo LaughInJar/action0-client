@@ -59,7 +59,8 @@ Full documentation including the API reference:
 **Status:** the core API is complete — the backend protocol with the
 eight backend implementations and instrumentation hooks, the raw
 `Client`, the typed `Operation`/`JsonOperation`/`APIClient` layer, and the
-stub backends for testing.
+stub backends for testing. Changes per release are listed in the
+[changelog](CHANGELOG.md), planned work in [TODO.md](TODO.md).
 
 ## Usage
 
@@ -151,7 +152,11 @@ regardless of the HTTP library underneath.
 
 Backends run `Hook`s (logging, metrics, tracing, request decoration)
 around every send — the bundled `LoggingHook` logs redacted requests and
-responses with timings. `action0.client.testing` ships recording stub
+responses with timings. What a hook cannot do — await a rate limiter
+before each request, send again, skip the send — is a few lines with the
+wrapper base classes (`SyncBackendWrapper`, `AsyncBackendWrapper`,
+`DeferredBackendWrapper`), which the bundled retry and caching backends
+are built on. `action0.client.testing` ships recording stub
 backends for all three execution models, so API clients are testable
 without a server:
 

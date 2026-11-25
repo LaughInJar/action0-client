@@ -72,15 +72,70 @@ from .fields import json_body
 from .fields import json_field
 from .fields import path_param
 from .fields import query
+from .options import RequestOptions
 
 R_co = TypeVar("R_co", covariant=True)
 """The parsed result type of an operation — what :py:meth:`Operation.parse`
 returns and what :py:meth:`action0.client.api.APIClient.send` resolves to."""
 
-_RESERVED_FIELD_NAMES = frozenset({"method", "path", "accept", "default_location"})
-"""Class-attribute names of :py:class:`Operation` that must not be used as
-field names (a field named ``path`` is almost certainly a forgotten
-``ClassVar`` — refuse it loudly)."""
+
+def _public_names(cls: type) -> set[str]:
+    """
+    The public names a class defines itself (not those it inherits).
+
+    :param cls: the class to look at
+    :return: its own attribute and method names without a leading
+             underscore
+    """
+    return {name for name in vars(cls) if not name.startswith("_")}
+
+
+def _reserved_names(cls: type) -> set[str]:
+    """
+    The names a field of an operation class must not use: everything
+    public that the library's own operation base classes in its MRO
+    define. A field of that name would replace the attribute or method —
+    ``check: bool`` turns ``operation.check(response)`` into calling a
+    bool.
+
+    The set is derived, not listed, so it can never lag behind the
+    classes. Base classes defined outside this module do not count: what
+    an application's own base class defines is the application's
+    business.
+
+    :param cls: the operation class whose fields are being checked
+    :return: the names its fields must not use
+    """
+    return {
+        name
+        for base in cls.__mro__[1:]
+        if base.__module__ == __name__
+        for name in _public_names(base)
+    }
+
+
+def reserved_field_names() -> frozenset[str]:
+    """
+    Every name that cannot be used as a field name of an operation: the
+    public attributes and methods of :py:class:`Operation` and
+    :py:class:`JsonOperation`.
+
+    For tools that generate operation classes (and have to rename
+    colliding API parameters, e.g. to ``check_`` with
+    ``query(name="check")``). The set is closed: new per-operation
+    settings go into :py:class:`~action0.client.options.RequestOptions`
+    rather than into new class attributes.
+
+    Example::
+
+        >>> sorted(reserved_field_names())  # doctest: +NORMALIZE_WHITESPACE
+        ['accept', 'as_request', 'check', 'default_location', 'load', 'load_json',
+         'method', 'parse', 'path', 'request_options', 'serialize_json_value',
+         'serialize_value']
+
+    :return: the reserved names
+    """
+    return frozenset(_public_names(Operation) | _public_names(JsonOperation))
 
 
 def _placeholders(path: str) -> set[str]:
@@ -146,7 +201,9 @@ class Operation(Generic[R_co], ABC):
     - the class is validated: every ``{placeholder}`` of the ``path``
       template must have exactly one matching
       :py:func:`~action0.client.fields.path_param` field, only one form of
-      request body may be declared, and reserved names are refused,
+      request body may be declared, and no field may take the name of
+      something the operation base classes define themselves (see
+      :py:func:`reserved_field_names`),
     - instances gain dataclass ``__init__``, ``__eq__`` and ``__repr__``.
 
     Subclasses choose the parsed result type via the generic parameter and
@@ -216,13 +273,25 @@ class Operation(Generic[R_co], ABC):
     bodies may set this to :py:attr:`~action0.client.fields.Location.JSON_FIELD`
     in its common base class."""
 
+    request_options: ClassVar["RequestOptions | None"] = None
+    """Per-request options for every request of this operation, applied
+    by :py:meth:`as_request` — e.g.
+    ``request_options = RequestOptions(retry_safe=True)`` for a ``POST``
+    endpoint that is safe to send again. A subclass assigning its own
+    replaces the inherited ones as a whole (``RequestOptions()`` leaves
+    everything undecided again). For options that depend on
+    the field values, override :py:meth:`as_request` and
+    :py:meth:`~action0.client.options.RequestOptions.apply` them to the
+    request there."""
+
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """
         Turn the new subclass into a keyword-only dataclass and validate
         its field/template consistency.
 
         :param kwargs: passed through to :py:meth:`object.__init_subclass__`
-        :raises TypeError: if a reserved name is used as a field, a path
+        :raises TypeError: if a field uses a name the operation base
+                           classes define themselves, a path
                            placeholder has no matching ``path_param`` field
                            (or vice versa), or more than one body form is
                            declared
@@ -241,12 +310,15 @@ class Operation(Generic[R_co], ABC):
         """
         specs = {field.name: cls._field_spec(field) for field in _dataclass_fields(cls)}
 
-        reserved = _RESERVED_FIELD_NAMES.intersection(specs)
+        reserved = sorted(_reserved_names(cls).intersection(specs))
         if reserved:
+            example = reserved[0]
             raise TypeError(
-                f"{cls.__name__}: {', '.join(sorted(reserved))} cannot be used as field"
-                " name(s) — these configure the operation class itself; if you meant to"
-                " configure, assign without a type annotation (or annotate as ClassVar)"
+                f"{cls.__name__}: {', '.join(reserved)} cannot be used as field name(s) —"
+                " the operation base class defines them itself. For an API parameter of"
+                f" that name, rename the field and keep the wire name: {example}_: ... ="
+                f' query(name="{example}"). If you meant to configure the class, assign'
+                " without a type annotation (or annotate as ClassVar)"
             )
 
         path_fields = {name for name, spec in specs.items() if spec.location is Location.PATH}
@@ -377,7 +449,10 @@ class Operation(Generic[R_co], ABC):
         if self.accept is not None and Header.ACCEPT not in headers:
             headers.add(Header.ACCEPT, self.accept)
 
-        return Request(url, self.method, headers=headers, body=request_body)
+        request = Request(url, self.method, headers=headers, body=request_body)
+        if self.request_options is not None:
+            self.request_options.apply(request)
+        return request
 
     def serialize_value(self, value: Any) -> "ParamValue | list[ParamValue]":
         """

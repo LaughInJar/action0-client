@@ -186,6 +186,117 @@ For non-JSON endpoints subclass
 [examples/petstore.py](https://github.com/LaughInJar/action0-client/blob/main/examples/petstore.py)
 for a 204-no-body endpoint.
 
+## Request options
+
+Some choices belong to a single endpoint rather than to the backend or
+to a policy shared by the whole client — whether a `POST` may be sent
+again, for example. An operation declares them once, as
+{py:class}`~action0.client.options.RequestOptions`, and every request it
+builds carries them:
+
+```python
+from typing import Any
+
+from action0.client import JsonOperation
+from action0.client import RequestOptions
+from action0.client import json_field
+from action0.req import Method
+
+
+class Translate(JsonOperation[Any]):
+    method = Method.POST
+    path = "/translate"
+    request_options = RequestOptions(retry_safe=True)  # reads only: safe to retry
+
+    text: str = json_field()
+
+
+request = Translate(text="hello").as_request("https://api.example.com")
+print(RequestOptions.of(request))
+# RequestOptions(retry_safe=True)
+print(request.meta)
+# {'action0-client': RequestOptions(retry_safe=True)}
+```
+
+The options travel in `request.meta` under the one key `action0-client`,
+so they are never sent on the wire. Backends and wrappers read them with
+`RequestOptions.of(request)`. Every option defaults to `None`, meaning
+"not decided here" — then the backend's or the policy's own setting
+applies.
+
+A subclass that assigns `request_options` replaces the inherited ones as
+a whole. For options that depend on the field values, override
+`as_request` and apply them to the request. Options applied later refine
+those applied earlier, field by field:
+
+```python
+from typing import Any
+
+from action0.client import JsonOperation
+from action0.client import RequestOptions
+from action0.client import json_field
+from action0.req import Method
+from action0.req import Request
+from action0.url import Url
+
+
+class SubmitJob(JsonOperation[Any]):
+    method = Method.POST
+    path = "/jobs"
+
+    dry_run: bool = json_field(default=False)
+
+    def as_request(self, base_url: str | Url | None = None) -> Request:
+        request = super().as_request(base_url)
+        if self.dry_run:  # a dry run changes nothing on the server
+            RequestOptions(retry_safe=True).apply(request)
+        return request
+
+
+print(RequestOptions.of(SubmitJob().as_request()))
+# RequestOptions()
+print(RequestOptions.of(SubmitJob(dry_run=True).as_request()))
+# RequestOptions(retry_safe=True)
+```
+
+The same `apply` works on a hand-built
+{py:class}`~action0.req.request.Request` sent through the raw
+{py:class}`~action0.client.client.Client`.
+
+## Reserved field names
+
+A field cannot take the name of something the operation base classes
+define themselves — `method`, `path`, `accept`, `default_location`,
+`request_options`, and the methods `as_request`, `parse`, `check`,
+`load`, `load_json`, `serialize_value` and `serialize_json_value`. A
+field called `check` would replace the `check()` method, so the class
+definition fails with a `TypeError` that says so.
+
+This never stands in the way of an API: only the Python attribute needs
+another name, the wire name stays what the API expects.
+
+```python
+from typing import Any
+
+from action0.client import JsonOperation
+from action0.client import query
+
+
+class Verify(JsonOperation[Any]):
+    path = "/verify"
+
+    check_: bool = query(name="check")  # sent as ?check=...
+
+
+print(Verify(check_=True).as_request("https://api.example.com").url.as_str())
+# https://api.example.com/verify?check=true
+```
+
+The set of reserved names is closed: new per-operation settings are
+added as fields of `RequestOptions`, not as new class attributes, so an
+upgrade does not take further names away. Code generators can ask for
+the set with {py:func}`~action0.client.operation.reserved_field_names`.
+
 ## A real client class
 
 Applications usually wrap `APIClient` once per API, fixing base URL and
