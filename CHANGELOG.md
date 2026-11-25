@@ -8,6 +8,29 @@ numbers follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `MockRouter` in `action0.client.testing`: mocking that does not depend
+  on the backend. Activated as a context manager — or through the
+  `action0_mock` pytest fixture, which a bundled pytest plugin provides
+  without making pytest a dependency — it answers the requests of every
+  backend built on the base classes, for the whole process. Hooks, error
+  translation and the retrying and caching backends still run.
+  - Routes match on method, scheme, host, port, path (exact, prefix,
+    regex or `{name}` template), a subset of query parameters and
+    headers, and the body (`content`, `json`, `data`).
+  - A route answers with a fixed response, a sequence, a sync or async
+    callable, a raised `TimeoutError` / `TransportError`, or lets the
+    request through.
+  - `route.calls`, `call_count`, `assert_all_called()`,
+    `assert_all_mocked()`; an unmatched request raises
+    `UnmockedRequestError` and fails the test again when the router is
+    left. `block_network=True` refuses every connection attempt.
+  - Mocked responses are delivered in the body mode the request asks
+    for. `ChunkedBody` / `respond(chunks=[...])` mocks a body arriving
+    in pieces, or breaking off midway.
+  - The API follows respx where it fits; the testing guide has a
+    comparison table.
+- The stub backends have a `router` with the same route API. Routes
+  answer what they match, the scripted responses the rest.
 - `Httpx2Backend` and `AsyncHttpx2Backend` in
   `action0.client.backends.httpx2`, behind the new `httpx2` extra (also
   part of `all`): the httpx backends for the httpx2 fork, with the same
@@ -76,6 +99,14 @@ numbers follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `action0.client.testing` is now a package; the import paths of the
+  stub backends are unchanged. The stubs are rebuilt on a private
+  `MockRouter`. Their constructor, `requests`, responders, hooks and the
+  "last response repeats" rule behave as before, with two differences: a
+  canned in-memory body is delivered in the body mode the request asks
+  for, and a response returned by a responder callable without a
+  `request` gets the current one attached.
+- While a `MockRouter` is active it also answers the stub backends.
 - `AsyncHttpxBackend` and `AiohttpBackend` without a passed-in client
   create their client per event loop on first use. Before,
   `AsyncHttpxBackend` created one client in its constructor, and both

@@ -33,6 +33,7 @@ from action0.client.backends.twisted import TwistedBackend
 from action0.client.backends.urllib import UrllibBackend
 from action0.client.backends.urllib3 import Urllib3Backend
 from action0.client.backends.futures import ThreadPoolBackend
+from action0.client.testing import MockRouter, ChunkedBody
 from action0.client.testing import StubBackend, AsyncStubBackend, DeferredStubBackend
 ```
 
@@ -172,5 +173,10 @@ from action0.client.testing import StubBackend, AsyncStubBackend, DeferredStubBa
 
 ```{eval-rst}
 .. automodule:: action0.client.testing
+   :members:
+```
+
+```{eval-rst}
+.. automodule:: action0.client.testing.pytest_plugin
    :members:
 ```

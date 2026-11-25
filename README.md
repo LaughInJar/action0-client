@@ -187,9 +187,27 @@ responses with timings. What a hook cannot do — await a rate limiter
 before each request, send again, skip the send — is a few lines with the
 wrapper base classes (`SyncBackendWrapper`, `AsyncBackendWrapper`,
 `DeferredBackendWrapper`), which the bundled retry and caching backends
-are built on. `action0.client.testing` ships recording stub
-backends for all three execution models, so API clients are testable
-without a server:
+are built on.
+
+`action0.client.testing` makes API clients testable without a server —
+and without the tests knowing which backend the application uses. A
+`MockRouter` (or the `action0_mock` pytest fixture) answers the requests
+of every backend in the process, with a route API modelled on respx:
+
+```python
+from action0.client.testing import MockRouter
+
+with MockRouter() as mock:
+    route = mock.get("https://api.example.com/v1/items/{item_id}").respond(
+        json={"id": 42, "name": "Thing"}
+    )
+    assert fetch_item(42) == Item(id=42, name="Thing")  # application code, any backend
+assert route.calls.last.request.url.path == "/v1/items/42"
+```
+
+A request no route matches fails the test instead of reaching the
+network. For tests that inject the backend there are recording stub
+backends for all three execution models:
 
 ```python
 from action0.client.testing import StubBackend

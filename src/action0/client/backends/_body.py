@@ -156,7 +156,9 @@ async def adeliver(
     return spool
 
 
-def deliver_bytes(request: Request, response: Response) -> "BodyTypes | None":
+def deliver_bytes(
+    request: Request, response: Response, mode: "BodyMode | None" = None
+) -> "BodyTypes | None":
     """
     The body of a response that is already in memory — a cached or a
     canned one — in the mode the request asked for, so that code written
@@ -171,9 +173,12 @@ def deliver_bytes(request: Request, response: Response) -> "BodyTypes | None":
 
     :param request: the request being answered
     :param response: the response whose in-memory body to hand out
+    :param mode: the mode to use; ``None`` takes the request's own
+                 option (and preloads if it has none)
     :return: the body in the requested form
     """
-    mode = RequestOptions.of(request).body
+    if mode is None:
+        mode = RequestOptions.of(request).body
     if mode is None or mode is BodyMode.PRELOAD or not _in_memory(response.body):
         return response.body
     data = response.body_bytes() or b""
@@ -184,7 +189,9 @@ def deliver_bytes(request: Request, response: Response) -> "BodyTypes | None":
     return spool
 
 
-async def adeliver_bytes(request: Request, response: Response) -> "BodyTypes | None":
+async def adeliver_bytes(
+    request: Request, response: Response, mode: "BodyMode | None" = None
+) -> "BodyTypes | None":
     """
     :py:func:`deliver_bytes` for async backends: a streamed body is an
     :py:class:`~action0.req.body.AsyncIterableBody`, and a spool is
@@ -192,9 +199,12 @@ async def adeliver_bytes(request: Request, response: Response) -> "BodyTypes | N
 
     :param request: the request being answered
     :param response: the response whose in-memory body to hand out
+    :param mode: the mode to use; ``None`` takes the request's own
+                 option (and preloads if it has none)
     :return: the body in the requested form
     """
-    mode = RequestOptions.of(request).body
+    if mode is None:
+        mode = RequestOptions.of(request).body
     if mode is None or mode is BodyMode.PRELOAD or not _in_memory(response.body):
         return response.body
     data = response.body_bytes() or b""

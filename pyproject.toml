@@ -58,6 +58,11 @@ all = [
     "action0-client[requests,httpx,httpx2,aiohttp,urllib3,twisted]",
 ]
 
+# the action0_mock fixture; loading the plugin needs pytest, which is
+# why only pytest ever imports that module
+[project.entry-points.pytest11]
+action0-client = "action0.client.testing.pytest_plugin"
+
 [project.urls]
 Homepage = "https://github.com/LaughInJar/action0-client"
 Documentation = "https://laughinjar.github.io/action0-client/"
