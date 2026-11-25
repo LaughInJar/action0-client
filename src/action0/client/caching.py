@@ -30,19 +30,18 @@ from typing import TYPE_CHECKING
 from typing import Awaitable
 from typing import Callable
 from typing import Protocol
-from typing import TypeVar
 
 from action0.req import Request
 from action0.req import Response
 
 from .backend import Backend
+from .wrapper import AsyncBackendWrapper
+from .wrapper import DeferredBackendWrapper
+from .wrapper import SyncBackendWrapper
 
 if TYPE_CHECKING:
     # twisted is an optional dependency: only the type checker sees this
     from twisted.internet.defer import Deferred
-
-T = TypeVar("T")
-S = TypeVar("S")
 
 
 class CacheStore(Protocol):
@@ -255,7 +254,7 @@ def _fresh_copy(cached: Response, request: Request) -> Response:
     return cached.copy(request=request)
 
 
-class CachingSyncBackend:
+class CachingSyncBackend(SyncBackendWrapper):
     """
     A caching wrapper around a synchronous backend — itself a
     ``Backend[Response]``, so it plugs into the clients like the backend
@@ -289,14 +288,9 @@ class CachingSyncBackend:
         :param store: where entries live; ``None`` creates a
                       :py:class:`MemoryCache`
         """
-        self._inner = inner
+        super().__init__(inner)
         self._policy = policy
         self._store = store if store is not None else MemoryCache()
-
-    @property
-    def inner(self) -> Backend[Response]:
-        """The wrapped backend doing the actual sends."""
-        return self._inner
 
     @property
     def store(self) -> CacheStore:
@@ -323,25 +317,8 @@ class CachingSyncBackend:
             self._store.set(key, response.copy(), self._policy.ttl)
         return response
 
-    def map(self, result: T, fn: Callable[[T], S]) -> S:
-        """
-        Apply a function to a result of :py:meth:`send` — synchronously
-        that is simply ``fn(result)``.
 
-        :param result: a value as returned by :py:meth:`send`
-        :param fn: the function to apply
-        :return: the return value of ``fn``
-        """
-        return fn(result)
-
-    def __repr__(self) -> str:
-        """
-        :return: the wrapper with its wrapped backend
-        """
-        return f"{self.__class__.__name__}({self._inner!r})"
-
-
-class CachingAsyncBackend:
+class CachingAsyncBackend(AsyncBackendWrapper):
     """
     A caching wrapper around an async backend — itself a
     ``Backend[Awaitable[Response]]``, so it plugs into the clients like
@@ -364,14 +341,9 @@ class CachingAsyncBackend:
         :param store: where entries live, sync or async; ``None`` creates
                       a :py:class:`MemoryCache`
         """
-        self._inner = inner
+        super().__init__(inner)
         self._policy = policy
         self._store: "CacheStore | AsyncCacheStore" = store if store is not None else MemoryCache()
-
-    @property
-    def inner(self) -> Backend[Awaitable[Response]]:
-        """The wrapped backend doing the actual sends."""
-        return self._inner
 
     @property
     def store(self) -> "CacheStore | AsyncCacheStore":
@@ -424,28 +396,8 @@ class CachingAsyncBackend:
             await self._keep(key, response.copy())
         return response
 
-    def map(self, result: Awaitable[T], fn: Callable[[T], S]) -> Awaitable[S]:
-        """
-        Apply a function inside an awaitable result of :py:meth:`send`.
 
-        :param result: an awaitable as returned by :py:meth:`send`
-        :param fn: the function to apply to the awaited value
-        :return: an awaitable of the return value of ``fn``
-        """
-
-        async def mapped() -> S:
-            return fn(await result)
-
-        return mapped()
-
-    def __repr__(self) -> str:
-        """
-        :return: the wrapper with its wrapped backend
-        """
-        return f"{self.__class__.__name__}({self._inner!r})"
-
-
-class CachingDeferredBackend:
+class CachingDeferredBackend(DeferredBackendWrapper):
     """
     A caching wrapper around a Twisted backend — itself a
     ``Backend[Deferred[Response]]``, so it plugs into the clients like
@@ -465,14 +417,9 @@ class CachingDeferredBackend:
         :param store: where entries live; ``None`` creates a
                       :py:class:`MemoryCache`
         """
-        self._inner = inner
+        super().__init__(inner)
         self._policy = policy
         self._store = store if store is not None else MemoryCache()
-
-    @property
-    def inner(self) -> "Backend[Deferred[Response]]":
-        """The wrapped backend doing the actual sends."""
-        return self._inner
 
     @property
     def store(self) -> CacheStore:
@@ -503,20 +450,3 @@ class CachingDeferredBackend:
             return response
 
         return self._inner.send(request).addCallback(store_and_pass)
-
-    def map(self, result: "Deferred[T]", fn: Callable[[T], S]) -> "Deferred[S]":
-        """
-        Apply a function inside a Deferred result of :py:meth:`send` —
-        Twisted's native ``addCallback``.
-
-        :param result: a Deferred as returned by :py:meth:`send`
-        :param fn: the function to apply to the eventual value
-        :return: a Deferred firing with the return value of ``fn``
-        """
-        return result.addCallback(fn)
-
-    def __repr__(self) -> str:
-        """
-        :return: the wrapper with its wrapped backend
-        """
-        return f"{self.__class__.__name__}({self._inner!r})"

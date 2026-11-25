@@ -23,10 +23,13 @@ from typing import cast
 from twisted.internet.defer import Deferred
 
 from action0.client import APIClient
+from action0.client import AsyncBackendWrapper
 from action0.client import Backend
 from action0.client import Client
+from action0.client import DeferredBackendWrapper
 from action0.client import JsonOperation
 from action0.client import Operation
+from action0.client import SyncBackendWrapper
 from action0.client import path_param
 from action0.client.backends.aiohttp import AiohttpBackend
 from action0.client.backends.futures import ThreadPoolBackend
@@ -170,6 +173,39 @@ def check_caching_wrappers_preserve_types(request: Request) -> None:
         CachingDeferredBackend(DeferredStubBackend()), "https://api.example.com"
     )
     assert_type(deferred_client.send(GetItem(item_id=1)), Deferred[Item])
+
+
+def check_wrapper_bases_preserve_types(request: Request) -> None:
+    """The public wrapper base classes are backends of their execution model."""
+    assert_type(Client(SyncBackendWrapper(StubBackend())).send(request), Response)
+    assert_type(SyncBackendWrapper(RequestsBackend()).inner, Backend[Response])
+    assert_type(SyncBackendWrapper(StubBackend()).map(1, str), str)
+    sync_client = APIClient(SyncBackendWrapper(RequestsBackend()), "https://api.example.com")
+    assert_type(sync_client.send(GetItem(item_id=1)), Item)
+
+    async_backend = AsyncBackendWrapper(AsyncStubBackend())
+    assert_type(async_backend.inner, Backend[Awaitable[Response]])
+    async_client = APIClient(async_backend, "https://api.example.com")
+    assert_type(async_client.send(GetItem(item_id=1)), Awaitable[Item])
+
+    deferred_backend = DeferredBackendWrapper(DeferredStubBackend())
+    assert_type(deferred_backend.send(request), Deferred[Response])
+    deferred_client = APIClient(deferred_backend, "https://api.example.com")
+    assert_type(deferred_client.send(GetItem(item_id=1)), Deferred[Item])
+
+
+class _Throttled(AsyncBackendWrapper):
+    """A user-defined wrapper: overriding ``send`` must keep the typing."""
+
+    async def send(self, request: Request) -> Response:
+        return await self.inner.send(request)
+
+
+def check_wrapper_subclass_preserves_types() -> None:
+    """A subclass overriding ``send`` still resolves the client overloads."""
+    client = APIClient(_Throttled(AsyncHttpxBackend()), "https://api.example.com")
+    assert_type(client.send(GetItem(item_id=1)), Awaitable[Item])
+    assert_type(client.backend, _Throttled)
 
 
 def check_client_custom_wrapper(request: Request) -> None:

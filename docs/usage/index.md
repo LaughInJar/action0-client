@@ -13,6 +13,7 @@ client
 backends
 streaming
 hooks
+wrappers
 errors
 retries
 caching

@@ -8,6 +8,8 @@ from typing import ClassVar
 from action0.client import APIError
 from action0.client import JsonOperation
 from action0.client import Operation
+from action0.client import RequestOptions
+from action0.client import reserved_field_names
 from action0.client.fields import Location
 from action0.client.fields import body
 from action0.client.fields import form_field
@@ -79,6 +81,81 @@ class DefinitionTestCase(unittest.TestCase):
 
             class Broken(JsonOperation[Any]):
                 path: str = query()  # type: ignore[misc]  # ty: ignore[invalid-attribute-override]
+
+    def test_every_name_of_the_base_classes_is_refused(self) -> None:
+        """
+        Test that no public attribute or method of the operation base
+        classes can be shadowed by a field — with or without a default —
+        and that the message shows the way out: a renamed field keeping
+        the wire name.
+        """
+        for name in sorted(reserved_field_names()):
+            for specifier in ("query()", "query(default=False)"):
+                with self.subTest(name=name, specifier=specifier):
+                    source = f"class Broken(JsonOperation[Any]):\n    {name}: bool = {specifier}\n"
+                    expected = f'{name}_: ... = query\\(name="{name}"\\)'
+                    with self.assertRaisesRegex(TypeError, expected):
+                        exec(source, {"JsonOperation": JsonOperation, "Any": Any, "query": query})
+
+    def test_renamed_field_keeps_the_wire_name(self) -> None:
+        """
+        Test the way out the message recommends: an API parameter called
+        like a method is sent under its own name.
+        """
+
+        class Verify(JsonOperation[Any]):
+            path = "/verify"
+            check_: bool = query(name="check")
+            load_: "str | None" = query(name="load", default=None)
+
+        request = Verify(check_=True, load_="full").as_request("https://api.example.com")
+        self.assertEqual(
+            request.url.as_str(), "https://api.example.com/verify?check=true&load=full"
+        )
+
+    def test_the_reserved_names_are_a_closed_set(self) -> None:
+        """
+        Test the exact set of reserved names. It is pinned on purpose:
+        every public name added to Operation or JsonOperation can break
+        an existing operation that has a field of that name, and tools
+        generating operations keep a list of these names. New
+        per-operation settings belong in RequestOptions instead.
+        """
+        self.assertEqual(
+            reserved_field_names(),
+            frozenset(
+                {
+                    "method",
+                    "path",
+                    "accept",
+                    "default_location",
+                    "request_options",
+                    "as_request",
+                    "serialize_value",
+                    "serialize_json_value",
+                    "parse",
+                    "check",
+                    "load",
+                    "load_json",
+                }
+            ),
+        )
+
+    def test_names_of_an_applications_base_class_are_not_reserved(self) -> None:
+        """
+        Test that only the library's own base classes reserve names: a
+        field may still override a plain attribute of an application's
+        intermediate base class.
+        """
+
+        class ApiOperation(JsonOperation[Any]):
+            page_size = 25
+
+        class ListItems(ApiOperation):
+            path = "/items"
+            page_size: int = query(default=50)
+
+        self.assertEqual(ListItems().as_request().url.as_str(), "/items?page_size=50")
 
     def test_missing_path_param_field_is_refused(self) -> None:
         """
@@ -577,3 +654,81 @@ class SerializeJsonValueTestCase(unittest.TestCase):
         """
         with self.assertRaisesRegex(ValueError, "JSON"):
             self.operation.serialize_json_value(object())
+
+
+class RequestOptionsTestCase(unittest.TestCase):
+    """
+    tests for :py:attr:`action0.client.operation.Operation.request_options`
+    """
+
+    def test_no_options_by_default(self) -> None:
+        """
+        Test that an operation without options leaves the request's meta
+        untouched.
+        """
+        request = SearchOperation(shelf="a", q="thing").as_request()
+        self.assertEqual(request.meta, {})
+
+    def test_class_level_options_are_applied_to_every_request(self) -> None:
+        """
+        Test that the options declared on the class ride along on each
+        request the operation builds.
+        """
+
+        class Translate(JsonOperation[Any]):
+            method = Method.POST
+            path = "/translate"
+            request_options = RequestOptions(retry_safe=True)
+            text: str = json_field()
+
+        for text in ("hello", "world"):
+            request = Translate(text=text).as_request("https://api.example.com")
+            self.assertIs(RequestOptions.of(request), Translate.request_options)
+
+    def test_subclass_replaces_the_inherited_options(self) -> None:
+        """
+        Test plain class-attribute semantics: a subclass inherits the
+        options, and its own assignment replaces them as a whole — empty
+        options to leave everything undecided again.
+        """
+
+        class Search(JsonOperation[Any]):
+            method = Method.POST
+            path = "/search"
+            request_options = RequestOptions(retry_safe=True)
+
+        class Inherited(Search):
+            pass
+
+        class Replaced(Search):
+            request_options = RequestOptions(retry_safe=False)
+
+        class Cleared(Search):
+            request_options = RequestOptions()
+
+        self.assertIs(RequestOptions.of(Inherited().as_request()).retry_safe, True)
+        self.assertIs(RequestOptions.of(Replaced().as_request()).retry_safe, False)
+        self.assertIsNone(RequestOptions.of(Cleared().as_request()).retry_safe)
+
+    def test_options_depending_on_field_values(self) -> None:
+        """
+        Test the dynamic form: an as_request() override applies options
+        computed from the instance on top of the class-level ones.
+        """
+
+        class Submit(JsonOperation[Any]):
+            method = Method.POST
+            path = "/jobs"
+            request_options = RequestOptions(retry_safe=False)
+            dry_run: bool = json_field(default=False)
+
+            def as_request(self, base_url: "str | Url | None" = None) -> Request:
+                request = super().as_request(base_url)
+                if self.dry_run:
+                    RequestOptions(retry_safe=True).apply(request)
+                return request
+
+        self.assertIs(RequestOptions.of(Submit().as_request()).retry_safe, False)
+        self.assertIs(RequestOptions.of(Submit(dry_run=True).as_request()).retry_safe, True)
+        # the shared class-level instance is never modified
+        self.assertEqual(Submit.request_options, RequestOptions(retry_safe=False))

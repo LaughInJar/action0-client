@@ -54,10 +54,15 @@ from .hooks import Hook
 from .hooks import LoggingHook
 from .operation import JsonOperation
 from .operation import Operation
+from .operation import reserved_field_names
+from .options import RequestOptions
 from .retry import RetryingAsyncBackend
 from .retry import RetryingDeferredBackend
 from .retry import RetryingSyncBackend
 from .retry import RetryPolicy
+from .wrapper import AsyncBackendWrapper
+from .wrapper import DeferredBackendWrapper
+from .wrapper import SyncBackendWrapper
 
 __version__: str = "0.1.0"
 
@@ -65,6 +70,7 @@ __all__ = [
     "APIClient",
     "APIError",
     "AsyncBackend",
+    "AsyncBackendWrapper",
     "AsyncCacheStore",
     "Backend",
     "BackendT_co",
@@ -79,6 +85,7 @@ __all__ = [
     "Client",
     "ClientError",
     "DeferredBackend",
+    "DeferredBackendWrapper",
     "FieldSpec",
     "FuturesBackend",
     "Hook",
@@ -87,12 +94,14 @@ __all__ = [
     "LoggingHook",
     "MemoryCache",
     "Operation",
+    "RequestOptions",
     "RetryPolicy",
     "RetryingAsyncBackend",
     "RetryingDeferredBackend",
     "RetryingSyncBackend",
     "SendResultT_co",
     "SyncBackend",
+    "SyncBackendWrapper",
     "TimeoutError",
     "TransportError",
     "body",
@@ -102,4 +111,5 @@ __all__ = [
     "json_field",
     "path_param",
     "query",
+    "reserved_field_names",
 ]

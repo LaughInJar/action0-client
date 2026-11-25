@@ -84,4 +84,5 @@ personal projects.
 
 usage/index
 api
+changelog
 ```

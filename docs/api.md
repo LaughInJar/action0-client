@@ -4,7 +4,7 @@ Everything public is importable from the package root:
 
 ```python
 from action0.client import Client, APIClient
-from action0.client import Operation, JsonOperation
+from action0.client import Operation, JsonOperation, RequestOptions, reserved_field_names
 from action0.client import body, header, json_body, json_field, path_param, query
 from action0.client import Backend, SyncBackend, AsyncBackend, DeferredBackend, FuturesBackend
 from action0.client import BackendT_co, SendResultT_co
@@ -16,6 +16,7 @@ from action0.client import (
     RetryingAsyncBackend,
     RetryingDeferredBackend,
 )
+from action0.client import SyncBackendWrapper, AsyncBackendWrapper, DeferredBackendWrapper
 from action0.client import ClientError, TransportError, TimeoutError, APIError
 ```
 
@@ -57,6 +58,14 @@ from action0.client.testing import StubBackend, AsyncStubBackend, DeferredStubBa
    :members:
 ```
 
+## Request options
+
+```{eval-rst}
+.. automodule:: action0.client.options
+   :members:
+   :special-members: __repr__
+```
+
 ## Field specifiers
 
 ```{eval-rst}
@@ -79,11 +88,20 @@ from action0.client.testing import StubBackend, AsyncStubBackend, DeferredStubBa
    :members:
 ```
 
+## Backend wrappers
+
+```{eval-rst}
+.. automodule:: action0.client.wrapper
+   :members:
+   :special-members: __repr__
+```
+
 ## Retries
 
 ```{eval-rst}
 .. automodule:: action0.client.retry
    :members:
+   :inherited-members:
 ```
 
 ## Caching
@@ -91,6 +109,7 @@ from action0.client.testing import StubBackend, AsyncStubBackend, DeferredStubBa
 ```{eval-rst}
 .. automodule:: action0.client.caching
    :members:
+   :inherited-members:
 ```
 
 ## Errors

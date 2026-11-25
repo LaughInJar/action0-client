@@ -31,7 +31,6 @@ from typing import TYPE_CHECKING
 from typing import Any
 from typing import Awaitable
 from typing import Callable
-from typing import TypeVar
 from typing import cast
 
 from action0.req import Header
@@ -40,14 +39,16 @@ from action0.req import Response
 
 from .backend import Backend
 from .errors import TransportError
+from .options import RequestOptions
+from .wrapper import AsyncBackendWrapper
+from .wrapper import DeferredBackendWrapper
+from .wrapper import SyncBackendWrapper
 
 if TYPE_CHECKING:
     # twisted is an optional dependency: only the type checker sees these
     from twisted.internet.defer import Deferred
     from twisted.python.failure import Failure
 
-T = TypeVar("T")
-S = TypeVar("S")
 
 IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE", "PUT", "DELETE"})
 """The HTTP methods that are safe to repeat per :rfc:`9110` — the default
@@ -161,11 +162,18 @@ class RetryPolicy:
 
     def applies_to(self, request: Request) -> bool:
         """
-        Whether the request's method may be retried at all.
+        Whether the request may be retried at all. A request that says
+        so itself — :py:attr:`RequestOptions.retry_safe
+        <action0.client.options.RequestOptions.retry_safe>` is ``True``
+        or ``False`` — is taken at its word; otherwise its method decides
+        (see :py:attr:`methods`).
 
         :param request: the request being sent
         :return: whether retrying is allowed for this request
         """
+        declared = RequestOptions.of(request).retry_safe
+        if declared is not None:
+            return declared
         return self.methods is None or request.method in self.methods
 
     def should_retry_response(self, request: Request, response: Response, attempt: int) -> bool:
@@ -199,7 +207,7 @@ class RetryPolicy:
         )
 
 
-class RetryingSyncBackend:
+class RetryingSyncBackend(SyncBackendWrapper):
     """
     A retrying wrapper around a synchronous backend — itself a
     ``Backend[Response]``, so it plugs into the clients like the backend
@@ -233,14 +241,9 @@ class RetryingSyncBackend:
         :param sleep: the wait function for the backoff (injectable for
                       tests)
         """
-        self._inner = inner
+        super().__init__(inner)
         self._policy = policy
         self._sleep = sleep
-
-    @property
-    def inner(self) -> Backend[Response]:
-        """The wrapped backend doing the actual sends."""
-        return self._inner
 
     def send(self, request: Request) -> Response:
         """
@@ -267,25 +270,8 @@ class RetryingSyncBackend:
             self._sleep(self._policy.delay_for(attempt, rejected))
             attempt += 1
 
-    def map(self, result: T, fn: Callable[[T], S]) -> S:
-        """
-        Apply a function to a result of :py:meth:`send` — synchronously
-        that is simply ``fn(result)``.
 
-        :param result: a value as returned by :py:meth:`send`
-        :param fn: the function to apply
-        :return: the return value of ``fn``
-        """
-        return fn(result)
-
-    def __repr__(self) -> str:
-        """
-        :return: the wrapper with its wrapped backend
-        """
-        return f"{self.__class__.__name__}({self._inner!r})"
-
-
-class RetryingAsyncBackend:
+class RetryingAsyncBackend(AsyncBackendWrapper):
     """
     A retrying wrapper around an async backend — itself a
     ``Backend[Awaitable[Response]]``, so it plugs into the clients like
@@ -307,14 +293,9 @@ class RetryingAsyncBackend:
                       ``None`` uses :py:func:`asyncio.sleep` (pass
                       ``trio.sleep`` on trio)
         """
-        self._inner = inner
+        super().__init__(inner)
         self._policy = policy
         self._sleep = sleep
-
-    @property
-    def inner(self) -> Backend[Awaitable[Response]]:
-        """The wrapped backend doing the actual sends."""
-        return self._inner
 
     async def send(self, request: Request) -> Response:
         """
@@ -349,28 +330,8 @@ class RetryingAsyncBackend:
             await sleep(self._policy.delay_for(attempt, rejected))
             attempt += 1
 
-    def map(self, result: Awaitable[T], fn: Callable[[T], S]) -> Awaitable[S]:
-        """
-        Apply a function inside an awaitable result of :py:meth:`send`.
 
-        :param result: an awaitable as returned by :py:meth:`send`
-        :param fn: the function to apply to the awaited value
-        :return: an awaitable of the return value of ``fn``
-        """
-
-        async def mapped() -> S:
-            return fn(await result)
-
-        return mapped()
-
-    def __repr__(self) -> str:
-        """
-        :return: the wrapper with its wrapped backend
-        """
-        return f"{self.__class__.__name__}({self._inner!r})"
-
-
-class RetryingDeferredBackend:
+class RetryingDeferredBackend(DeferredBackendWrapper):
     """
     A retrying wrapper around a Twisted backend — itself a
     ``Backend[Deferred[Response]]``, so it plugs into the clients like
@@ -393,14 +354,9 @@ class RetryingDeferredBackend:
                         global reactor (imported lazily on the first send,
                         not at construction)
         """
-        self._inner = inner
+        super().__init__(inner)
         self._policy = policy
         self._reactor = reactor
-
-    @property
-    def inner(self) -> "Backend[Deferred[Response]]":
-        """The wrapped backend doing the actual sends."""
-        return self._inner
 
     def send(self, request: Request) -> "Deferred[Response]":
         """
@@ -444,20 +400,3 @@ class RetryingDeferredBackend:
             )
 
         return attempt_once(1)
-
-    def map(self, result: "Deferred[T]", fn: Callable[[T], S]) -> "Deferred[S]":
-        """
-        Apply a function inside a Deferred result of :py:meth:`send` —
-        Twisted's native ``addCallback``.
-
-        :param result: a Deferred as returned by :py:meth:`send`
-        :param fn: the function to apply to the eventual value
-        :return: a Deferred firing with the return value of ``fn``
-        """
-        return result.addCallback(fn)
-
-    def __repr__(self) -> str:
-        """
-        :return: the wrapper with its wrapped backend
-        """
-        return f"{self.__class__.__name__}({self._inner!r})"
