@@ -361,15 +361,21 @@ class SyncBodyModes(ServerTestCase):
         with self.assertRaises(TransportError):
             with send(self.request("/blob?size=200000&cut=70000", BodyMode.STREAM)) as first:
                 first.save_body(path)
+        # how much of the data before the break a library hands out
+        # differs (possibly nothing): the file size is what counts
         offset = path.stat().st_size
-        self.assertGreater(offset, 0)
         self.assertLess(offset, 200000)
+        self.assertEqual(path.read_bytes(), blob(200000)[:offset])
 
         resume = self.request("/blob?size=200000", BodyMode.STREAM)
-        resume.headers["Range"] = f"bytes={offset}-"
+        if offset:
+            resume.headers["Range"] = f"bytes={offset}-"
         with send(resume) as second:
-            self.assertEqual(second.status, 206)
-            self.assertTrue(second.headers["Content-Range"].startswith(f"bytes {offset}-"))
+            if offset:
+                self.assertEqual(second.status, 206)
+                self.assertTrue(second.headers["Content-Range"].startswith(f"bytes {offset}-"))
+            else:
+                self.assertEqual(second.status, 200)
             self.assertEqual(second.save_body(path, append=True), 200000 - offset)
         self.assertEqual(path.read_bytes(), blob(200000))
 
@@ -568,15 +574,22 @@ class AsyncBodyModes(ServerTestCase, unittest.IsolatedAsyncioTestCase):
             first = await send(self.request("/blob?size=200000&cut=70000", BodyMode.STREAM))
             async with first:
                 await first.asave_body(path)
+        # how much of the data before the break a library hands out
+        # differs: aiohttp drops what it had buffered when the break is
+        # noticed before the data was read, so nothing may have arrived
         offset = path.stat().st_size
-        self.assertGreater(offset, 0)
         self.assertLess(offset, 200000)
+        self.assertEqual(path.read_bytes(), blob(200000)[:offset])
 
         resume = self.request("/blob?size=200000", BodyMode.STREAM)
-        resume.headers["Range"] = f"bytes={offset}-"
+        if offset:
+            resume.headers["Range"] = f"bytes={offset}-"
         async with await send(resume) as second:
-            self.assertEqual(second.status, 206)
-            self.assertTrue(second.headers["Content-Range"].startswith(f"bytes {offset}-"))
+            if offset:
+                self.assertEqual(second.status, 206)
+                self.assertTrue(second.headers["Content-Range"].startswith(f"bytes {offset}-"))
+            else:
+                self.assertEqual(second.status, 200)
             self.assertEqual(await second.asave_body(path, append=True), 200000 - offset)
         self.assertEqual(path.read_bytes(), blob(200000))
 

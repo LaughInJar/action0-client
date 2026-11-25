@@ -167,6 +167,12 @@ def download(client: Client[Response], url: str, path: str, attempts: int = 5) -
     raise RuntimeError(f"giving up after {attempts} attempts")
 ```
 
+How much of the data that preceded a break reaches the file depends on
+the HTTP library: most hand out everything they received before they
+raise, while aiohttp drops what it had buffered but not yet handed out.
+The loop above is correct either way, because it takes the offset from
+the file.
+
 A break in the middle of a body is raised as the library-independent
 {py:class}`~action0.client.errors.TransportError` (or
 {py:class}`~action0.client.errors.TimeoutError`) on every backend, with
