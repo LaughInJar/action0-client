@@ -70,7 +70,9 @@ class LoggingHook(Hook):
     """
     A ready-made :py:class:`Hook` that logs every request, response and
     error. Requests and responses are logged via their ``repr()``, which
-    redacts secret header values and passwords — safe for production logs.
+    redacts secret header values, passwords and secret query parameters
+    (``api_key``, ``token``, … — ``Request.secret_params``) — safe for
+    production logs.
 
     Example::
 

@@ -526,6 +526,49 @@ class AsRequestTestCase(unittest.TestCase):
         relative = operation.as_request()
         self.assertEqual(relative.url.as_str(), "/shelves/a/items?q=x&pageSize=25")
 
+    def test_a_base_without_a_path_stands_for_the_root(self) -> None:
+        """
+        Test that the operation path is rendered as it is written — with
+        its leading "/" — when the base URL has neither a path nor a host
+        to append it to, in whichever form "no base" is given.
+        """
+        operation = SearchOperation(shelf="a", q="x")
+
+        for base_url in (None, "", Url()):
+            with self.subTest(base_url=base_url):
+                self.assertEqual(
+                    operation.as_request(base_url).url.as_str(),
+                    "/shelves/a/items?q=x&pageSize=25",
+                )
+
+        # the other parts of such a base are kept
+        self.assertEqual(
+            operation.as_request("?token=t").url.as_str(),
+            "/shelves/a/items?token=t&q=x&pageSize=25",
+        )
+
+        # the template's own "/" is not what decides
+        class NoSlash(JsonOperation[Any]):
+            path = "items"
+
+        self.assertEqual(NoSlash().as_request().url.as_str(), "/items")
+
+    def test_a_relative_base_path_stays_relative(self) -> None:
+        """
+        Test that a base URL which is a relative path by the caller's
+        choice is appended to, not made absolute.
+        """
+        operation = SearchOperation(shelf="a", q="x")
+
+        self.assertEqual(
+            operation.as_request("v2").url.as_str(),
+            "v2/shelves/a/items?q=x&pageSize=25",
+        )
+        self.assertEqual(
+            operation.as_request("/v2").url.as_str(),
+            "/v2/shelves/a/items?q=x&pageSize=25",
+        )
+
     def test_empty_path_uses_the_base_url(self) -> None:
         """
         Test operations against the base URL itself.

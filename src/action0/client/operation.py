@@ -373,7 +373,8 @@ class Operation(Generic[R_co], ABC):
 
         :param base_url: the URL the endpoint path is appended to, e.g.
                          ``"https://api.example.com/v2"``; ``None`` builds
-                         a relative request (handy for inspecting)
+                         a request for the path alone, ``/shelves/a/items``
+                         (handy for inspecting)
         :return: the request, ready to be sent through a backend
         :raises ValueError: if a path parameter is ``None``, or a value
                             cannot be serialized for its location
@@ -431,7 +432,12 @@ class Operation(Generic[R_co], ABC):
                 raw_body = cast("BodyTypes", value)
 
         # the operation path is always relative to the base URL; "/" joins
-        # them exactly once (Url.__truediv__)
+        # them exactly once (Url.__truediv__). A base with neither a path
+        # nor an authority has nothing to join to, and "/" would leave the
+        # result a relative path ("items"); such a base stands for the
+        # root, so that the path is rendered as it is written ("/items")
+        if self.path and not base.path and base.hostname is None:
+            base = base.copy(path="/")
         url = base / self.path.format_map(path_values) if self.path else base.copy()
         for name, value_s in query_items:
             url.query.add(name, value_s)

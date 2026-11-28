@@ -159,8 +159,21 @@ numbers follow [Semantic Versioning](https://semver.org/).
   body that was never read. Garbage collection remains the fallback.
 - The backends' `stream=True` argument is now the backend's default
   body mode; a request's own `body` option takes precedence.
-- Requires the action0-req release that provides `SpooledBody` and
-  `Response.close()`.
+- Requires action0-req 0.3.0 (was 0.1.1) and action0-url 0.2.1 (was
+  0.1.0), each capped below its next minor release: a minor release of
+  a 0.x package may change behaviour. action0-req 0.2.0 provides
+  `SpooledBody` and `Response.close()`, which the body modes build on.
+  Both releases change behaviour that reaches you through the `Request`,
+  `Response` and `Url` objects of this library — a streamed body can be
+  read once and says so, header names and values are validated, a `Url`
+  without a scheme no longer gets `https`, `repr(request)` redacts
+  secret query parameters, and more. See the changelogs of
+  [action0-req](https://github.com/LaughInJar/action0-req/blob/main/CHANGELOG.md)
+  and
+  [action0-url](https://github.com/LaughInJar/action0-url/blob/main/CHANGELOG.md).
+  The requests of this library are built as before; in particular
+  `Operation.as_request()` without a base URL still gives the path with
+  its leading `/`.
 
 ### Fixed
 
