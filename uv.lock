@@ -84,8 +84,8 @@ docs = [
 
 [package.metadata]
 requires-dist = [
-    { name = "action0-req", git = "https://github.com/LaughInJar/action0-req?branch=main" },
-    { name = "action0-url", specifier = ">=0.1.0" },
+    { name = "action0-req", specifier = ">=0.3.0,<0.4" },
+    { name = "action0-url", specifier = ">=0.2.1,<0.3" },
     { name = "aiohttp", marker = "extra == 'aiohttp'", specifier = ">=3.9" },
     { name = "aiohttp", marker = "extra == 'all'", specifier = ">=3.9" },
     { name = "httpx", marker = "extra == 'all'", specifier = ">=0.27" },
@@ -128,19 +128,23 @@ docs = [
 
 [[package]]
 name = "action0-req"
-version = "0.1.1"
-source = { git = "https://github.com/LaughInJar/action0-req?branch=main#2412fe651aa04bb01503834255b265b86bbc9fe0" }
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "action0-url" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0b/be/ad5a94f4f8406da535fe101b5fd9fc76a43fc82d0a803ede4aaa4b506e1b/action0_req-0.3.0.tar.gz", hash = "sha256:69a4649c66de098e3758226d27c6ed77618359b5c0e46c93956dfc12e3b1723f", size = 209411, upload-time = "2026-11-26T16:37:58.72Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ac/95/8b2e832cb8f40e381d13b48ad18a7572224f6f0bd60ac15514030eba7b4a/action0_req-0.3.0-py3-none-any.whl", hash = "sha256:3ac711ade043b6bec1636da81ddd134983761389c4c8e7b2b86f6b2dbe2ff66a", size = 61174, upload-time = "2026-11-26T16:37:57.34Z" },
 ]
 
 [[package]]
 name = "action0-url"
-version = "0.1.0"
+version = "0.2.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/c9/6c/c77be6980c1e677f51e99711289d02c8252afd0ca8e95adc41a8458b306d/action0_url-0.1.0.tar.gz", hash = "sha256:c202e5eb7465793282d2d8342fc2128bdd2497d4cfd9dd596aef5d1d86a2c33e", size = 82090, upload-time = "2026-08-08T06:24:41.464Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/da/46/0ea01759640060aa2bf440dc034503c27f709e7f72408ad2e101c12a1cf5/action0_url-0.2.1.tar.gz", hash = "sha256:cf07ebd4824d5327f9902c042678dfd9eebe4ec3f59c7ed3b58942b73d213b66", size = 69898, upload-time = "2026-11-26T16:27:14.979Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a5/be/84ebbe2caae13d91b828025cf1ddc964574f640cc4a1fd3dc5bc4eb49a34/action0_url-0.1.0-py3-none-any.whl", hash = "sha256:b10d76c81cc6862345b94a55c6df4e6ba1ab0c098cc1af41c07850cb83a4667d", size = 14791, upload-time = "2026-08-08T06:24:40.285Z" },
+    { url = "https://files.pythonhosted.org/packages/1c/ab/18d336f5e8fe39904e6476d3cfb9167ad0dff660560528105b9dba0d96b9/action0_url-0.2.1-py3-none-any.whl", hash = "sha256:3a98f9ccb8f2049c0c07d8dc988c8d3901550208cd97ae4199b6632ce3ace0f1", size = 31385, upload-time = "2026-11-26T16:27:13.714Z" },
 ]
 
 [[package]]

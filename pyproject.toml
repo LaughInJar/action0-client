@@ -9,9 +9,11 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
+# capped below the next minor: a minor release of a 0.x package may
+# change behaviour (as action0-url 0.2.0 did)
 dependencies = [
-    "action0-req>=0.1.1",
-    "action0-url>=0.1.0",
+    "action0-req>=0.3.0,<0.4",
+    "action0-url>=0.2.1,<0.3",
 ]
 keywords = ["http", "client", "api", "typed", "sync", "async", "twisted", "requests", "httpx", "aiohttp"]
 classifiers = [
@@ -68,14 +70,6 @@ Homepage = "https://github.com/LaughInJar/action0-client"
 Documentation = "https://laughinjar.github.io/action0-client/"
 Source = "https://github.com/LaughInJar/action0-client"
 Issues = "https://github.com/LaughInJar/action0-client/issues"
-
-# TEMPORARY, until action0-req 0.2.0 is on PyPI: this branch needs
-# SpooledBody and Response.close(), which are merged there but not
-# released. Remove this table and raise the lower bound above to
-# "action0-req>=0.2.0" in the release PR — PyPI rejects a wheel whose
-# requirements carry a direct git URL.
-[tool.uv.sources]
-action0-req = { git = "https://github.com/LaughInJar/action0-req", branch = "main" }
 
 [dependency-groups]
 dev = [

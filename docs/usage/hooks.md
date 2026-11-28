@@ -25,9 +25,10 @@ backend.send(Request("https://api.example.com/health"))
 # <- Response(200 OK) for Request(GET https://api.example.com/health) in 0ms
 ```
 
-`repr()` of requests and responses redacts secret header values and URL
-passwords, which makes {py:class}`~action0.client.hooks.LoggingHook` safe
-for production logs.
+`repr()` of requests and responses redacts secret header values, URL
+passwords and secret query parameters (`api_key`, `token`, `signature`,
+… — the names in `Request.secret_params`), which makes
+{py:class}`~action0.client.hooks.LoggingHook` safe for production logs.
 
 Custom hooks subclass {py:class}`~action0.client.hooks.Hook` and override
 what they need — `on_request` (may replace the request), `on_response`
